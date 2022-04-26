@@ -1,0 +1,76 @@
+{
+    "exp_name": "demo",
+    "exp_id": "01",
+    
+    "model": {
+        "type": "MetaDynamics",
+        "args": {
+            "input_dim": 32,
+            "z_dim": 100,
+            "emission_dim": 2048,
+            "transition_dim": 200,
+            "rnn_dim": 600,
+            "total_dim": 60,
+            "obs_dim": 3,
+            "rnn_type": "lstm",
+            "rnn_layers": 1,
+            "rnn_bidirection": true,
+            "train_init": false,
+            "reverse_rnn_input": true,
+            "sample": true
+        }
+    },
+
+    "data":{
+        "data_set": "BouncingBallDataLoader",
+        "data_dir": "data/bouncing_ball",
+        "data_name": "mixed_gravity_8",
+        "num_workers": 0,
+        "k_shot": 3
+    },
+
+    "optimizer": {
+        "type": "Adam",
+        "args": {
+            "lr": 1e-3,
+            "weight_decay": 1e-5,
+            "amsgrad": true,
+            "betas": [0.9, 0.999]
+        }
+    },
+    "lr_scheduler": 0,
+
+    "loss": "meta_loss",
+    "metrics": [
+        "mse"
+    ],
+
+    "batch_size": 100,
+    "device": 0,
+    "training": {
+        "epochs": 500,
+        "overfit_single_batch": false,
+
+        "save_period": 50,
+        "loss_type": "bce",
+
+        "monitor": "min val_loss",
+        "early_stop": 20,
+
+        "min_annealing_factor": 0.0,
+        "anneal_update": 1000,
+
+        "total_len": 60,
+        "reverse": true,
+
+        "lambda": 10,
+        "r1": 10,
+        "r2": 1e5,
+        "r3": 1
+    },
+    "evaluating": {
+        "total_len": 60
+    },
+    
+    "best_model": "m_best"
+}
