@@ -25,7 +25,7 @@ def evaluate_epoch(model, data_loader, metrics, exp_dir, hparams, eval_config, d
     total_len = eval_config.get('total_len')
     reverse = eval_config.get('reverse')
     n_steps = 0
-    bces, mses = None, None
+    bces, mses, vpts = None, None, None
 
     recons = None
     grdths = None
@@ -86,11 +86,21 @@ def evaluate_epoch(model, data_loader, metrics, exp_dir, hparams, eval_config, d
                         mses = mse
                     else:
                         mses = np.concatenate((mses, mse), axis=0)
+                if met.__name__ == 'vpt':
+                    # reconstruction
+                    vpt = met(x_, x)
+                    vpt = tensor2np(vpt)
+                    if idx == 0:
+                        vpts = vpt
+                    else:
+                        vpts = np.concatenate((vpts, vpt), axis=0)
     for met in metrics:
         if met.__name__ == 'bce':
             print_results(exp_dir, 'bce', bces)
         if met.__name__ == 'mse':
             print_results(exp_dir, 'mse', mses)
+        if met.__name__ == 'vpt':
+            print_results(exp_dir, 'vpt', vpts)
 
     save_result(exp_dir, recons, grdths, labels, data_tag)
 
@@ -106,7 +116,7 @@ def prediction_epoch(model, eval_data_loader, pred_data_loader, metrics, exp_dir
     total_len = eval_config.get('total_len')
     reverse = eval_config.get('reverse')
     n_steps = 0
-    bces, mses = None, None
+    bces, mses, vpts = None, None, None
 
     recons = None
     grdths = None
@@ -175,11 +185,21 @@ def prediction_epoch(model, eval_data_loader, pred_data_loader, metrics, exp_dir
                         mses = mse
                     else:
                         mses = np.concatenate((mses, mse), axis=0)
+                if met.__name__ == 'vpt':
+                    # reconstruction
+                    vpt = met(x_, x)
+                    vpt = tensor2np(vpt)
+                    if idx == 0:
+                        vpts = vpt
+                    else:
+                        vpts = np.concatenate((vpts, vpt), axis=0)
     for met in metrics:
         if met.__name__ == 'bce':
             print_results(exp_dir, 'bce', bces)
         if met.__name__ == 'mse':
             print_results(exp_dir, 'mse', mses)
+        if met.__name__ == 'vpt':
+            print_results(exp_dir, 'vpt', vpts)
 
     save_result(exp_dir, recons, grdths, labels, data_tag)
 

@@ -42,7 +42,7 @@
 
     "loss": "meta_loss",
     "metrics": [
-        "mse"
+        "mse", "vpt"
     ],
 
     "batch_size": 100,

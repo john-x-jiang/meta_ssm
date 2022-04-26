@@ -24,30 +24,17 @@ def top_k_acc(output, target, k=3):
     return correct / len(target)
 
 
-def nll_metric(output, target, mask=None):
-    assert output.dim() == target.dim()
-    assert output.size() == target.size()
-    assert mask.dim() == 2
-    assert mask.size(1) == output.size(1)
-    
-    loss = nll_loss(output, target)  # (batch_size, time_step, input_dim)
-    loss = mask * loss.sum(dim=-1)  # (batch_size, time_step)
-    loss = loss.sum(dim=1, keepdim=True)  # (batch_size, 1)
-    return loss
-
-
-def kl_div_metric(output, target, mask):
-    mu1, logvar1 = output
-    mu2, logvar2 = target
-    assert mu1.size() == mu2.size()
-    assert logvar1.size() == logvar2.size()
-    assert mu1.dim() == logvar1.dim() == 3
-    assert mask.dim() == 2
-    assert mask.size(1) == mu1.size(1)
-    kl = kl_div(mu1, logvar1, mu2, logvar2)
-    kl = mask * kl.sum(dim=-1)
-    kl = kl.sum(dim=1, keepdim=True)
-    return kl
+def vpt(output, target):
+    epsilon = 0.025
+    B, T = target.shape[0], target.shape[1]
+    W, H = target.shape[2], target.shape[3]
+    mse = F.mse_loss(output, target, reduction='none')
+    mse_m = mse.sum(axis=[2, 3]) / (W * H)
+    vpt = torch.zeros(B).to(mse.device)
+    for i in range(B):
+        vpt[i] = torch.min(torch.where(mse_m[i, :] < epsilon)[0])
+    vpt = vpt / T
+    return vpt
 
 
 def bce(output, target):
