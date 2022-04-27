@@ -63,7 +63,7 @@ def train_driver(model, checkpt, epoch_start, optimizer, lr_scheduler, \
 
         # Step LR
         if lr_scheduler is not None:
-            lr_scheduler.step(val_loss)
+            lr_scheduler.step()
             last_lr = lr_scheduler._last_lr
         else:
             last_lr = 1

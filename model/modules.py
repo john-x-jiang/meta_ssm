@@ -66,7 +66,7 @@ class Emission(nn.Module):
             self.lin2 = nn.Linear(emission_dim, emission_dim)
             self.lin3 = nn.Linear(emission_dim, input_dim)
         
-        self.act = nn.ELU()
+        self.act = nn.ELU(inplace=True)
         self.out = nn.Sigmoid()
 
     def forward(self, z_t, z_domain=None):
@@ -148,7 +148,7 @@ class Transition(nn.Module):
         self.act_var = nn.Tanh()
 
         self.act_weight = nn.Sigmoid()
-        self.act = nn.ELU()
+        self.act = nn.ELU(inplace=True)
 
     def init_z_0(self, trainable=True):
         return nn.Parameter(torch.zeros(self.z_dim), requires_grad=trainable), \
@@ -346,23 +346,23 @@ class Aggregator(nn.Module):
         self.stochastic = stochastic
         
         self.lin1 = nn.Linear(time_dim, 1)
-        self.act = nn.ELU()
+        self.act = nn.ELU(inplace=True)
 
-        self.lin2 = nn.Linear(rnn_dim, 2 * rnn_dim)
-        self.lin_m = nn.Linear(2 * rnn_dim, z_dim)
-        self.lin_v = nn.Linear(2 * rnn_dim, z_dim)
+        self.lin2 = nn.Linear(2 * rnn_dim, rnn_dim)
+        self.lin_m = nn.Linear(rnn_dim, z_dim)
+        self.lin_v = nn.Linear(rnn_dim, z_dim)
+        # self.lin_m.weight.data = torch.eye(z_dim)
+        # self.lin_m.bias.data = torch.zeros(z_dim)
         # self.act_v = nn.Softplus()
         self.act_v = nn.Tanh()
 
     def forward(self, x):
         B, T, _ = x.shape
         x = x.permute(0, 2, 1).contiguous()
-        x = self.act(self.lin1(x))  # TODO: need to check the value here
+        x = self.lin1(x)
         x = torch.squeeze(x)
         
-        _mu = 0.5 * (x[:, :self.rnn_dim] + x[:, self.rnn_dim:])
-        _mu = self.act(self.lin2(_mu))
-
+        _mu = self.lin2(x)
         mu = self.lin_m(_mu)
         if self.stochastic:
             _var = self.lin_v(_mu)

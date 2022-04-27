@@ -174,11 +174,11 @@ class MetaDynamics(BaseModel):
 
         self.embedding = nn.Sequential(
             nn.Linear(input_dim**2, 2 * input_dim**2),
-            nn.ELU(),
+            nn.ELU(inplace=True),
             nn.Linear(2 * input_dim**2, 2 * input_dim**2),
-            nn.ELU(),
+            nn.ELU(inplace=True),
             nn.Linear(2 * input_dim**2, rnn_dim),
-            nn.ELU()
+            nn.ELU(inplace=True)
         )
 
         # domain
@@ -190,6 +190,10 @@ class MetaDynamics(BaseModel):
         self.aggregator = Aggregator(rnn_dim, z_dim, total_dim, stochastic=False)
         self.mu = nn.Linear(z_dim, z_dim)
         self.var = nn.Linear(z_dim, z_dim)
+        # self.act_var = nn.Softplus()
+        # self.mu.weight.data = torch.eye(z_dim)
+        # self.mu.bias.data = torch.zeros(z_dim)
+
         # initialization
         self.init_seq_encoder = RnnEncoder(rnn_dim, rnn_dim,
                                               n_layer=rnn_layers, drop_rate=0.0,
@@ -228,9 +232,10 @@ class MetaDynamics(BaseModel):
         
         z_c = sum(D_z_c) / len(D_z_c)
         mu = self.mu(z_c)
-        var = self.mu(z_c)
+        var = self.var(z_c)
         mu = torch.clamp(mu, min=-100, max=85)
         var = torch.clamp(var, min=-100, max=85)
+        # var = self.act_var(var)
         return mu, var
 
     def latent_dynamics(self, T, z_c, z_0):
@@ -390,7 +395,7 @@ class MetaDynamics_LatentODE(BaseModel):
         
         z_c = sum(D_z_c) / len(D_z_c)
         mu = self.mu(z_c)
-        var = self.mu(z_c)
+        var = self.var(z_c)
         mu = torch.clamp(mu, min=-100, max=85)
         var = torch.clamp(var, min=-100, max=85)
         return mu, var

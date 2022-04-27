@@ -116,7 +116,11 @@ def train(hparams, checkpt, train_loader, valid_loader, exp_dir):
         optimizer.load_state_dict(checkpt['optimizer'])
 
     # lr scheduler
-    lr_scheduler = None if not hparams.lr_scheduler else getattr(optim.lr_scheduler, hparams.lr_scheduler)
+    if not hparams.lr_scheduler or hparams.lr_scheduler == 0:
+        lr_scheduler = None
+    else:
+        lr_scheduler_info = dict(hparams.lr_scheduler)
+        lr_scheduler = getattr(optim.lr_scheduler, lr_scheduler_info['type'])(optimizer, **lr_scheduler_info['args'])
     
     # count number of parameters in the mdoe
     num_params = get_network_paramcount(model)
