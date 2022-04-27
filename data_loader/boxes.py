@@ -95,7 +95,7 @@ class PymunkData(Dataset):
                     spt_idx = sample_idx[0:self.k_shot]
                 self.spt_idx[label_id] = samples[spt_idx]
 
-            if self.is_train == 'train':
+            if self.is_train == 'train' or self.is_train == 'valid':
                 qry_idx = sample_idx[self.k_shot:]
                 self.qry_idx.extend(samples[qry_idx].tolist())
             else:

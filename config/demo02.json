@@ -1,22 +1,19 @@
 {
     "exp_name": "demo",
-    "exp_id": "01",
+    "exp_id": "02",
     
     "model": {
-        "type": "MetaDynamics",
+        "type": "MetaDynamics_LatentODE",
         "args": {
             "input_dim": 32,
-            "z_dim": 64,
+            "latent_dim": 64,
             "emission_dim": 2048,
-            "transition_dim": 128,
-            "rnn_dim": 256,
             "total_dim": 60,
             "obs_dim": 3,
-            "rnn_type": "lstm",
+            "ode_layer": 3,
             "rnn_layers": 1,
             "rnn_bidirection": true,
             "train_init": false,
-            "reverse_rnn_input": true,
             "sample": true
         }
     },
@@ -61,16 +58,16 @@
         "anneal_update": 1000,
 
         "total_len": 60,
-        "reverse": true,
+        "reverse": false,
 
-        "lambda": 1,
+        "lambda": 10,
         "r1": 1,
         "r2": 1,
         "r3": 1
     },
     "evaluating": {
         "total_len": 60,
-        "reverse": true
+        "reverse": false
     },
     
     "best_model": "m_best"

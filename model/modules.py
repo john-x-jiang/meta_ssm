@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.init as weight_init
 from torch.distributions import MultivariateNormal, Normal
-import torchdiffeq
+from torchdiffeq import odeint
 from data_loader.seq_util import reverse_sequence
 
 
@@ -337,11 +337,6 @@ class RnnEncoder(nn.Module):
         return h_rnn
 
 
-"""
-Domain module
-"""
-
-
 class Aggregator(nn.Module):
     def __init__(self, rnn_dim, z_dim, time_dim, stochastic=True):
         super().__init__()
@@ -371,6 +366,136 @@ class Aggregator(nn.Module):
         mu = self.lin_m(_mu)
         if self.stochastic:
             _var = self.lin_v(_mu)
+            _var = torch.clamp(_var, min=-100, max=85)
+            var = self.act_v(_var)
+            return mu, var
+        else:
+            return mu
+
+
+class ODE_RNN(nn.Module):
+    def __init__(self, latent_dim, rnn_layer=1, drop_rate=0.0, bd=False,
+                 orthogonal_init=False, ode_layer=3, stochastic=True):
+        super().__init__()
+        self.latent_dim = latent_dim
+        self.ode_layer = ode_layer
+        self.stochastic = stochastic
+        
+        self.rnn = nn.GRUCell(input_size=latent_dim, hidden_size=latent_dim)
+        
+        self.ode_func = nn.ModuleList()
+        self.ode_func.append(nn.Linear(latent_dim, 2 * latent_dim))
+        for i in range(ode_layer - 2):
+            self.ode_func.append(nn.Linear(2 * latent_dim, 2 * latent_dim))
+        self.ode_func.append(nn.Linear(2 * latent_dim, latent_dim))
+
+        self.act = nn.ELU(inplace=True)
+        self.act_last = nn.Tanh()
+
+        self.lin_m = nn.Linear(latent_dim, latent_dim)
+        if stochastic:
+            self.lin_v = nn.Linear(latent_dim, latent_dim)
+            # self.lin_m.weight.data = torch.eye(latent_dim)
+            # self.lin_m.bias.data = torch.zeros(latent_dim)
+            self.act_v = nn.Tanh()
+        
+        if orthogonal_init:
+            self.init_weights()
+
+    def init_weights(self):
+        for w in self.rnn.parameters():
+            if w.dim() > 1:
+                weight_init.orthogonal_(w)
+    
+    def ode_solver(self, t, x):
+        z = x.contiguous()
+        for idx, layers in enumerate(self.ode_func):
+            if idx != self.ode_layer - 1:
+                z = self.act(layers(z))
+            else:
+                z = self.act_last(layers(z))
+        return z
+    
+    def forward(self, x):
+        B, T = x.shape[0], x.shape[1]
+
+        # t = torch.linspace(0, T - 1, T).to(device)
+        t = torch.Tensor([0, 1]).float().to(device)
+        solver = lambda t, x: self.ode_solver(t, x)
+
+        seq_length = T * torch.ones(B).int().to(device)
+        x_reverse = reverse_sequence(x, seq_length)
+
+        z_0 = x_reverse[:, 0, :]
+        for i in range(1, T):
+            zt_ = odeint(solver, z_0, t, method='rk4', rtol=1e-5, atol=1e-7, options={'step_size': 0.5})
+            zt_ = zt_[-1, :]
+            xt = x_reverse[:, i, :]
+            zt = self.rnn(zt_, xt)
+            z_0 = zt
+        
+        z_0 = z_0.view(B, -1)
+        mu = self.lin_m(z_0)
+        if self.stochastic:
+            _var = self.lin_v(z_0)
+            _var = torch.clamp(_var, min=-100, max=85)
+            var = self.act_v(_var)
+            return mu, var
+        else:
+            return mu
+
+
+class Transition_ODE(nn.Module):
+    def __init__(self, latent_dim, ode_layer=3, domain=False, stochastic=True):
+        super().__init__()
+        self.latent_dim = latent_dim
+        self.ode_layer = 3
+        self.domain = domain
+        self.stochastic = stochastic
+
+        self.ode_func = nn.ModuleList()
+        self.ode_func.append(nn.Linear(latent_dim, 2 * latent_dim))
+        for i in range(ode_layer - 2):
+            self.ode_func.append(nn.Linear(2 * latent_dim, 2 * latent_dim))
+        self.ode_func.append(nn.Linear(2 * latent_dim, latent_dim))
+        
+        self.act = nn.ELU()
+        self.act_last = nn.Tanh()
+
+        if domain:
+            self.combine = nn.Linear(2 * latent_dim, latent_dim)
+        
+        self.lin_m = nn.Linear(latent_dim, latent_dim)
+        if stochastic:
+            self.lin_v = nn.Linear(latent_dim, latent_dim)
+            self.act_v = nn.Tanh()
+    
+    def ode_solver(self, t, x):
+        z = x.contiguous()
+        for idx, layers in enumerate(self.ode_func):
+            if idx != self.ode_layer - 1:
+                z = self.act(layers(z))
+            else:
+                z = self.act_last(layers(z))
+        return z
+    
+    def forward(self, T, z_0, z_c=None):
+        B = z_0.shape[0]
+        t = torch.linspace(0, T - 1, T).to(device)
+        solver = lambda t, x: self.ode_solver(t, x)
+
+        if self.domain:
+            z_in = torch.cat([z_0, z_c], dim=1)
+            z_in = self.combine(z_in)
+        else:
+            z_in = z_0
+
+        zt = odeint(solver, z_in, t, method='rk4', rtol=1e-5, atol=1e-7, options={'step_size': 0.5})
+        zt = zt.permute(1, 0, 2).contiguous()
+        
+        mu = self.lin_m(zt)
+        if self.stochastic:
+            _var = self.lin_v(zt)
             _var = torch.clamp(_var, min=-100, max=85)
             var = self.act_v(_var)
             return mu, var
