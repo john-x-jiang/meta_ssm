@@ -31,6 +31,7 @@ def vpt(output, target):
     mse = F.mse_loss(output, target, reduction='none')
     mse_m = mse.sum(axis=[2, 3]) / (W * H)
     vpt = torch.zeros(B).to(mse.device)
+    # import ipdb; ipdb.set_trace()
     for i in range(B):
         vpt[i] = torch.min(torch.where(mse_m[i, :] < epsilon)[0])
     vpt = vpt / T

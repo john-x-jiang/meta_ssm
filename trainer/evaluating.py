@@ -24,6 +24,7 @@ def evaluate_epoch(model, data_loader, metrics, exp_dir, hparams, eval_config, d
     model.eval()
     total_len = eval_config.get('total_len')
     reverse = eval_config.get('reverse')
+    domain = eval_config.get('domain')
     n_steps = 0
     bces, mses, vpts = None, None, None
 
@@ -36,6 +37,7 @@ def evaluate_epoch(model, data_loader, metrics, exp_dir, hparams, eval_config, d
             x, D, x_state, D_state, label = batch
             if total_len is not None:
                 x = x[:, :total_len]
+                D = D[:, :, :total_len]
 
             B, T = x.shape[0], x.shape[1]
             K = D.shape[1]
@@ -54,7 +56,10 @@ def evaluate_epoch(model, data_loader, metrics, exp_dir, hparams, eval_config, d
                 inputs = x
                 inputs_D = D
             
-            x_, D_, mu_c, var_c, mu_t, var_t, mu_0, var_0, D_mu0, D_var0 = model(inputs, inputs_D)
+            if domain:
+                x_, D_, mu_c, var_c, mu_t, var_t, mu_0, var_0, D_mu0, D_var0 = model(inputs, inputs_D)
+            else:
+                x_, mu_0, var_0 = model(inputs)
             n_steps += 1
             
             if torch.isnan(x_).any():
@@ -115,6 +120,7 @@ def prediction_epoch(model, eval_data_loader, pred_data_loader, metrics, exp_dir
     model.eval()
     total_len = eval_config.get('total_len')
     reverse = eval_config.get('reverse')
+    domain = eval_config.get('domain')
     n_steps = 0
     bces, mses, vpts = None, None, None
 
@@ -126,8 +132,6 @@ def prediction_epoch(model, eval_data_loader, pred_data_loader, metrics, exp_dir
         data_iterator = iter(eval_data_loader)
         for idx, batch in enumerate(pred_data_loader):
             x, _, x_state, _, label = batch
-            if total_len is not None:
-                x = x[:, :total_len]
 
             try:
                 eval_batch = next(data_iterator)
@@ -135,6 +139,10 @@ def prediction_epoch(model, eval_data_loader, pred_data_loader, metrics, exp_dir
                 data_iterator = iter(eval_data_loader)
                 eval_batch = next(data_iterator)
             _, D, _, D_state, label = eval_batch
+
+            if total_len is not None:
+                x = x[:, :total_len]
+                D = D[:, :, :total_len]
 
             B, T = x.shape[0], x.shape[1]
             K = D.shape[1]
@@ -153,7 +161,10 @@ def prediction_epoch(model, eval_data_loader, pred_data_loader, metrics, exp_dir
                 inputs = x
                 inputs_D = D
             
-            x_, D_, mu_c, var_c, mu_t, var_t, mu_0, var_0, D_mu0, D_var0 = model(inputs, inputs_D)
+            if domain:
+                x_, D_, mu_c, var_c, mu_t, var_t, mu_0, var_0, D_mu0, D_var0 = model(inputs, inputs_D)
+            else:
+                x_, mu_0, var_0 = model(inputs)
             n_steps += 1
             
             if torch.isnan(x_).any():

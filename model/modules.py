@@ -49,33 +49,22 @@ class Emission(nn.Module):
         A valid probability that parameterizes the
         Bernoulli distribution `p(x_t | z_t)`
     """
-    def __init__(self, z_dim, emission_dim, input_dim, is_sigmoid=True, domain=False):
+    def __init__(self, z_dim, emission_dim, input_dim, is_sigmoid=True):
         super().__init__()
         self.z_dim = z_dim
         self.emission_dim = emission_dim
         self.input_dim = input_dim
         self.is_sigmoid = is_sigmoid
-        self.domain = domain
 
-        if domain:
-            self.lin1 = nn.Linear(z_dim*2, emission_dim*2)
-            self.lin2 = nn.Linear(emission_dim*2, emission_dim*2)
-            self.lin3 = nn.Linear(emission_dim*2, input_dim)
-        else:
-            self.lin1 = nn.Linear(z_dim, emission_dim)
-            self.lin2 = nn.Linear(emission_dim, emission_dim)
-            self.lin3 = nn.Linear(emission_dim, input_dim)
+        self.lin1 = nn.Linear(z_dim, emission_dim)
+        self.lin2 = nn.Linear(emission_dim, emission_dim)
+        self.lin3 = nn.Linear(emission_dim, input_dim)
         
         self.act = nn.ELU(inplace=True)
         self.out = nn.Sigmoid()
 
-    def forward(self, z_t, z_domain=None):
-        if self.domain:
-            z_combine = torch.cat((z_t, z_domain), dim=1)
-            h1 = self.act(self.lin1(z_combine))
-        else:
-            h1 = self.act(self.lin1(z_t))
-        
+    def forward(self, z_t):
+        h1 = self.act(self.lin1(z_t))
         h2 = self.act(self.lin2(h1))
         if self.is_sigmoid:
             return self.out(self.lin3(h2))

@@ -66,7 +66,7 @@ def train_driver(model, checkpt, epoch_start, optimizer, lr_scheduler, \
             lr_scheduler.step()
             last_lr = lr_scheduler._last_lr
         else:
-            last_lr = 1
+            last_lr = optimizer.param_groups[0]['lr']
         
         # Generate the checkpoint for this current epoch
         log = {
@@ -128,7 +128,7 @@ def train_driver(model, checkpt, epoch_start, optimizer, lr_scheduler, \
         
     # save & plot losses
     losses = {
-        'loss_total': [
+        'total': [
             train_loss,
             val_loss
         ],
@@ -158,6 +158,7 @@ def train_epoch(model, epoch, loss, optimizer, data_loader, hparams):
     total_len = train_config.get('total_len')
     reverse = train_config.get('reverse')
     loss_type = train_config.get('loss_type')
+    domain = train_config.get('domain')
     kl_m_c_loss, kl_m_ct_loss, kl_initial_loss = 0, 0, 0
     likelihood_loss, total_loss = 0, 0
     len_epoch = len(data_loader)
@@ -170,6 +171,7 @@ def train_epoch(model, epoch, loss, optimizer, data_loader, hparams):
         x, D, x_state, D_state, label = batch
         if total_len is not None:
             x = x[:, :total_len]
+            D = D[:, :, :total_len]
 
         B, T = x.shape[0], x.shape[1]
         K = D.shape[1]
@@ -200,16 +202,21 @@ def train_epoch(model, epoch, loss, optimizer, data_loader, hparams):
         r2 = train_config.get('r2')
         r3 = train_config.get('r3')
         
-        x_, D_, mu_c, var_c, mu_t, var_t, mu_0, var_0, D_mu0, D_var0 = model(inputs, inputs_D)
+        if domain:
+            x_, D_, mu_c, var_c, mu_t, var_t, mu_0, var_0, D_mu0, D_var0 = model(inputs, inputs_D)
 
-        kl_m_c, kl_m_ct, kl_initial, likelihood, total = loss(x, x_, D, D_, \
-            mu_c, var_c, mu_t, var_t, mu_0, var_0, D_mu0, D_var0, kl_factor, loss_type, r1, r2, r3)
+            kl_m_c, kl_m_ct, kl_initial, likelihood, total = loss(x, x_, D, D_, \
+                mu_c, var_c, mu_t, var_t, mu_0, var_0, D_mu0, D_var0, kl_factor, loss_type, r1, r2, r3)
+        else:
+            x_, mu_0, var_0 = model(inputs)
+            kl_initial, likelihood, total = loss(x, x_, mu_0, var_0, kl_factor, loss_type, r1)
         total.backward()
 
-        kl_m_c_loss += kl_m_c.item()
-        kl_m_ct_loss += kl_m_ct.item()
         kl_initial_loss += kl_initial.item()
         likelihood_loss += likelihood.item()
+        if domain:
+            kl_m_c_loss += kl_m_c.item()
+            kl_m_ct_loss += kl_m_ct.item()
         total_loss += total.item()
         n_steps += 1
 
@@ -232,6 +239,7 @@ def valid_epoch(model, epoch, loss, data_loader, hparams):
     total_len = train_config.get('total_len')
     reverse = train_config.get('reverse')
     loss_type = train_config.get('loss_type')
+    domain = train_config.get('domain')
     kl_m_c_loss, kl_m_ct_loss, kl_initial_loss = 0, 0, 0
     likelihood_loss, total_loss = 0, 0
     n_steps = 0
@@ -244,6 +252,7 @@ def valid_epoch(model, epoch, loss, data_loader, hparams):
             x, D, x_state, D_state, label = batch
             if total_len is not None:
                 x = x[:, :total_len]
+                D = D[:, :, :total_len]
 
             B, T = x.shape[0], x.shape[1]
             K = D.shape[1]
@@ -269,15 +278,20 @@ def valid_epoch(model, epoch, loss, data_loader, hparams):
             r2 = train_config.get('r2')
             r3 = train_config.get('r3')
             
-            x_, D_, mu_c, var_c, mu_t, var_t, mu_0, var_0, D_mu0, D_var0 = model(inputs, inputs_D)
+            if domain:
+                x_, D_, mu_c, var_c, mu_t, var_t, mu_0, var_0, D_mu0, D_var0 = model(inputs, inputs_D)
 
-            kl_m_c, kl_m_ct, kl_initial, likelihood, total = loss(x, x_, D, D_, \
-                mu_c, var_c, mu_t, var_t, mu_0, var_0, D_mu0, D_var0, kl_factor, loss_type, r1, r2, r3)
+                kl_m_c, kl_m_ct, kl_initial, likelihood, total = loss(x, x_, D, D_, \
+                    mu_c, var_c, mu_t, var_t, mu_0, var_0, D_mu0, D_var0, kl_factor, loss_type, r1, r2, r3)
+            else:
+                x_, mu_0, var_0 = model(inputs)
+                kl_initial, likelihood, total = loss(x, x_, mu_0, var_0, kl_factor, loss_type, r1)
             
-            kl_m_c_loss += kl_m_c.item()
-            kl_m_ct_loss += kl_m_ct.item()
             kl_initial_loss += kl_initial.item()
             likelihood_loss += likelihood.item()
+            if domain:
+                kl_m_c_loss += kl_m_c.item()
+                kl_m_ct_loss += kl_m_ct.item()
             total_loss += total.item()
             n_steps += 1
 

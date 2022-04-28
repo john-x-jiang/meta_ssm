@@ -79,7 +79,7 @@ class BayesianFilter(BaseModel):
         # generative model
         self.transition = Transition(z_dim, transition_dim,
                                      identity_init=True,
-                                     domain=True,
+                                     domain=False,
                                      stochastic=False)
         self.correction = Correction(z_dim, rnn_dim, stochastic=False)
         self.emission = Emission(z_dim, emission_dim, input_dim**2)
@@ -98,30 +98,15 @@ class BayesianFilter(BaseModel):
         z_0 = self.reparameterization(mu_0, var_0)
         return z_0, mu_0, var_0
 
-    def latent_domain(self, D_ss):
-        D_mu_c = []
-        D_var_c = []
-        for s in D_ss:
-            s_rnn = self.seq_encoder(s)
-            mu_c_i, var_c_i = self.aggregator(s_rnn)
-            D_mu_c.append(mu_c_i)
-            D_var_c.append(var_c_i)
-        
-        mu = sum(D_mu_c) / len(D_mu_c)
-        var = sum(D_var_c) / len(D_var_c)
-        mu = torch.clamp(mu, min=-100, max=85)
-        var = torch.clamp(var, min=-100, max=85)
-        return mu, var
-
     def latent_dynamics(self, T, z_0, s_x):
         batch_size = z_0.shape[0]
         z_ = torch.zeros([batch_size, T, self.z_dim]).to(device)
-        z_prev = z_0
-        z_[:, 0, :] = z_0
+        z_prev = self.correction(s_x[:, 0, :], z_0)
+        z_[:, 0, :] = z_prev
 
         for t in range(1, T):
-            zt_ = self.transition(z_prev, z_c)
-            zt = self.correction(zt_, s_x[:, t, :])
+            zt_ = self.transition(z_prev)
+            zt = self.correction(s_x[:, t, :], zt_)
             z_prev = zt
             z_[:, t, :] = zt
         return z_
@@ -135,7 +120,6 @@ class BayesianFilter(BaseModel):
 
         z_0, mu_0, var_0 = self.latent_initialization(s_x[:, :self.obs_dim, :])
         z_ = self.latent_dynamics(T, z_0, s_x)
-
         x_ = self.emission(z_)
         x_ = x_.view(batch_size, T, self.input_dim, self.input_dim)
 
@@ -191,6 +175,7 @@ class MetaDynamics(BaseModel):
         self.mu = nn.Linear(z_dim, z_dim)
         self.var = nn.Linear(z_dim, z_dim)
         # self.act_var = nn.Softplus()
+        self.act_var = nn.Tanh()
         # self.mu.weight.data = torch.eye(z_dim)
         # self.mu.bias.data = torch.zeros(z_dim)
 
@@ -235,7 +220,7 @@ class MetaDynamics(BaseModel):
         var = self.var(z_c)
         mu = torch.clamp(mu, min=-100, max=85)
         var = torch.clamp(var, min=-100, max=85)
-        # var = self.act_var(var)
+        var = self.act_var(var)
         return mu, var
 
     def latent_dynamics(self, T, z_c, z_0):
@@ -297,6 +282,7 @@ class MetaDynamics(BaseModel):
         mu_t, var_t = self.latent_domain(D_ss)
 
         return x_, D_, mu_c, var_c, mu_t, var_t, mu_0, var_0, D_mu0, D_var0
+        # return None, D_, mu_c, var_c, None, None, None, None, D_mu0, D_var0
 
     def prediction(self, x, D):
         T = x.size(1)
