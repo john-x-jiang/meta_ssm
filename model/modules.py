@@ -373,14 +373,22 @@ class ODE_RNN(nn.Module):
         
         self.rnn = nn.GRUCell(input_size=latent_dim, hidden_size=latent_dim)
         
-        self.ode_func = nn.ModuleList()
-        self.ode_func.append(nn.Linear(latent_dim, 2 * latent_dim))
-        for i in range(ode_layer - 2):
-            self.ode_func.append(nn.Linear(2 * latent_dim, 2 * latent_dim))
-        self.ode_func.append(nn.Linear(2 * latent_dim, latent_dim))
+        self.layers_dim = [latent_dim] + (ode_layer - 2) * [latent_dim * 2] + [latent_dim]
+        self.layers = []
+        self.acts = []
+        self.layer_norms = []
+        for i, (n_in, n_out) in enumerate(zip(self.layers_dim[:-1], self.layers_dim[1:])):
+            self.acts.append(get_act('leaky_relu') if i < ode_layer else get_act('linear'))
+            self.layers.append(nn.Linear(n_in, n_out, device=device))
+            self.layer_norms.append(nn.LayerNorm(n_out, device=device) if True and i < ode_layer else nn.Identity())
+        # self.ode_func = nn.ModuleList()
+        # self.ode_func.append(nn.Linear(latent_dim, 2 * latent_dim))
+        # for i in range(ode_layer - 2):
+        #     self.ode_func.append(nn.Linear(2 * latent_dim, 2 * latent_dim))
+        # self.ode_func.append(nn.Linear(2 * latent_dim, latent_dim))
 
-        self.act = nn.ELU(inplace=True)
-        self.act_last = nn.Tanh()
+        # self.act = nn.ELU(inplace=True)
+        # self.act_last = nn.Tanh()
 
         self.lin_m = nn.Linear(latent_dim, latent_dim)
         if stochastic:
@@ -398,26 +406,24 @@ class ODE_RNN(nn.Module):
                 weight_init.orthogonal_(w)
     
     def ode_solver(self, t, x):
-        z = x.contiguous()
-        for idx, layers in enumerate(self.ode_func):
-            if idx != self.ode_layer - 1:
-                z = self.act(layers(z))
-            else:
-                z = self.act_last(layers(z))
-        return z
+        # for idx, layers in enumerate(self.ode_func):
+        #     z = self.act(layers(z))
+        for norm, a, layer in zip(self.layer_norms, self.acts, self.layers):
+            x = a(norm(layer(x)))
+        return x
     
     def forward(self, x):
         B, T = x.shape[0], x.shape[1]
 
-        # t = torch.linspace(0, T - 1, T).to(device)
         t = torch.Tensor([0, 1]).float().to(device)
         solver = lambda t, x: self.ode_solver(t, x)
 
         seq_length = T * torch.ones(B).int().to(device)
         x_reverse = reverse_sequence(x, seq_length)
 
-        z_0 = x_reverse[:, 0, :]
-        for i in range(1, T):
+        z_0 = torch.zeros_like(x_reverse[:, 0, :])
+        z_0 = self.rnn(z_0, x_reverse[:, 0, :])
+        for i in range(T):
             zt_ = odeint(solver, z_0, t, method='rk4', rtol=1e-5, atol=1e-7, options={'step_size': 0.5})
             zt_ = zt_[-1, :]
             xt = x_reverse[:, i, :]
@@ -443,14 +449,22 @@ class Transition_ODE(nn.Module):
         self.domain = domain
         self.stochastic = stochastic
 
-        self.ode_func = nn.ModuleList()
-        self.ode_func.append(nn.Linear(latent_dim, 2 * latent_dim))
-        for i in range(ode_layer - 2):
-            self.ode_func.append(nn.Linear(2 * latent_dim, 2 * latent_dim))
-        self.ode_func.append(nn.Linear(2 * latent_dim, latent_dim))
-        
-        self.act = nn.ELU()
-        self.act_last = nn.Tanh()
+        self.layers_dim = [latent_dim] + (ode_layer - 2) * [latent_dim * 2] + [latent_dim]
+        self.layers = []
+        self.acts = []
+        self.layer_norms = []
+        for i, (n_in, n_out) in enumerate(zip(self.layers_dim[:-1], self.layers_dim[1:])):
+            self.acts.append(get_act('leaky_relu') if i < ode_layer else get_act('linear'))
+            self.layers.append(nn.Linear(n_in, n_out, device=device))
+            self.layer_norms.append(nn.LayerNorm(n_out, device=device) if True and i < ode_layer else nn.Identity())
+        # self.ode_func = nn.ModuleList()
+        # self.ode_func.append(nn.Linear(latent_dim, 2 * latent_dim))
+        # for i in range(ode_layer - 2):
+        #     self.ode_func.append(nn.Linear(2 * latent_dim, 2 * latent_dim))
+        # self.ode_func.append(nn.Linear(2 * latent_dim, latent_dim))
+
+        # self.act = nn.ELU(inplace=True)
+        # self.act_last = nn.Tanh()
 
         if domain:
             self.combine = nn.Linear(2 * latent_dim, latent_dim)
@@ -461,13 +475,12 @@ class Transition_ODE(nn.Module):
             self.act_v = nn.Tanh()
     
     def ode_solver(self, t, x):
-        z = x.contiguous()
-        for idx, layers in enumerate(self.ode_func):
-            if idx != self.ode_layer - 1:
-                z = self.act(layers(z))
-            else:
-                z = self.act_last(layers(z))
-        return z
+        # z = x.contiguous()
+        # for idx, layers in enumerate(self.ode_func):
+        #     z = self.act(layers(z))
+        for norm, a, layer in zip(self.layer_norms, self.acts, self.layers):
+            x = a(norm(layer(x)))
+        return x
     
     def forward(self, T, z_0, z_c=None):
         B = z_0.shape[0]
@@ -491,3 +504,29 @@ class Transition_ODE(nn.Module):
             return mu, var
         else:
             return mu
+
+
+def get_act(act="relu"):
+    """
+    Return torch function of a given activation function
+    :param act: activation function
+    :return: torch object
+    """
+    if act == "relu":
+        return nn.ReLU()
+    elif act == "leaky_relu":
+        return nn.LeakyReLU()
+    elif act == "sigmoid":
+        return nn.Sigmoid()
+    elif act == "tanh":
+        return nn.Tanh()
+    elif act == "linear":
+        return nn.Identity()
+    elif act == 'softplus':
+        return nn.modules.activation.Softplus()
+    elif act == 'softmax':
+        return nn.Softmax()
+    elif act == "swish":
+        return nn.SiLU()
+    else:
+        return None

@@ -133,6 +133,84 @@ class BayesianFilter(BaseModel):
         return x_, mu_0, var_0
 
 
+class LatentODE(BaseModel):
+    def __init__(self,
+                 input_dim,
+                 latent_dim,
+                 emission_dim,
+                 init_dim,
+                 obs_dim,
+                 ode_layer,
+                 rnn_layers,
+                 rnn_bidirection,
+                 train_init,
+                 sample=True):
+        super().__init__()
+        self.input_dim = input_dim
+        self.latent_dim = latent_dim
+        self.emission_dim = emission_dim
+        self.init_dim = init_dim
+        self.obs_dim = obs_dim
+        self.ode_layer = ode_layer
+        self.rnn_layers = rnn_layers
+        self.rnn_bidirection = rnn_bidirection
+        self.train_init = train_init
+        self.sample = sample
+
+        self.embedding = nn.Sequential(
+            nn.Linear(input_dim**2, 2 * input_dim**2),
+            nn.ELU(),
+            nn.Linear(2 * input_dim**2, 2 * input_dim**2),
+            nn.ELU(),
+            nn.Linear(2 * input_dim**2, latent_dim),
+            nn.ELU()
+        )
+
+        # initialization
+        self.initalization = ODE_RNN(latent_dim, rnn_layer=1, drop_rate=0.0,
+                                     bd=rnn_bidirection, ode_layer=ode_layer)
+
+        # generative model
+        self.transition = Transition_ODE(latent_dim, ode_layer=ode_layer,
+                                         domain=False,
+                                         stochastic=False)
+        self.emission = Emission(latent_dim, emission_dim, input_dim**2)
+
+    def reparameterization(self, mu, var):
+        if not self.sample:
+            return mu
+        # std = torch.sqrt(var)
+        std = torch.exp(0.5 * var)
+        eps = torch.randn_like(std)
+        return mu + eps * std
+    
+    def latent_initialization(self, y):
+        mu_0, var_0 = self.initalization(y)
+        z_0 = self.reparameterization(mu_0, var_0)
+        return z_0, mu_0, var_0
+
+    def latent_dynamics(self, T, z_0):
+        batch_size = z_0.shape[0]
+        z_ = self.transition(T, z_0)
+        return z_
+
+    def forward(self, x):
+        T = x.size(1)
+        batch_size = x.size(0)
+
+        # initial condition
+        x = x.view(batch_size, T, self.input_dim**2)
+        s_x = self.embedding(x)
+        z_0, mu_0, var_0 = self.latent_initialization(s_x[:, :self.init_dim, :])
+
+        # Meta-model-based dynamics on target set
+        z_ = self.latent_dynamics(T, z_0)
+        x_ = self.emission(z_)
+        x_ = x_.view(batch_size, T, self.input_dim, self.input_dim)
+
+        return x_, mu_0, var_0
+
+
 class MetaDynamics(BaseModel):
     def __init__(self,
                  input_dim,
@@ -319,7 +397,7 @@ class MetaDynamics(BaseModel):
         z_0, mu_0, var_0 = self.latent_initialization(s_x[:, :self.init_dim, :])
 
         # Meta-model-based dynamics on target set
-        z_ = self.latent_dynamics(T, z_c, z_0)
+        z_ = self.latent_dynamics(T, z_c, z_0, s_x)
         x_ = self.emission(z_)
         x_ = x_.view(batch_size, T, self.input_dim, self.input_dim)
 
