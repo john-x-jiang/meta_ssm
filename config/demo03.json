@@ -1,9 +1,9 @@
 {
     "exp_name": "demo",
-    "exp_id": "01",
+    "exp_id": "03",
     
     "model": {
-        "type": "MetaDynamics",
+        "type": "BayesianFilter",
         "args": {
             "input_dim": 32,
             "z_dim": 128,
@@ -39,7 +39,7 @@
     },
     "lr_scheduler": 0,
 
-    "loss": "meta_loss",
+    "loss": "dmm_loss",
     "metrics": [
         "mse"
     ],
@@ -52,7 +52,7 @@
 
         "save_period": 50,
         "loss_type": "bce",
-        "domain": true,
+        "domain": false,
 
         "monitor": "min val_loss",
         "early_stop": 50,
@@ -71,7 +71,7 @@
     "evaluating": {
         "total_len": 40,
         "reverse": false,
-        "domain": true
+        "domain": false
     },
     
     "best_model": "m_latest"

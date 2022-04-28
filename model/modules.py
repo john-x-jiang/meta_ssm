@@ -145,6 +145,7 @@ class Transition(nn.Module):
 
     def forward(self, z_t_1, z_domain=None):
         if self.domain:
+            # TODO: see if there is something wrong
             z_combine = torch.cat((z_t_1, z_domain), dim=1)
             _g_t = self.act(self.lin1(z_combine))
             g_t = self.act_weight(self.lin2(_g_t))

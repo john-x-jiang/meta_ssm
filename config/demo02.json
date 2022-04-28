@@ -8,8 +8,8 @@
             "input_dim": 32,
             "latent_dim": 64,
             "emission_dim": 2048,
-            "total_dim": 60,
-            "obs_dim": 3,
+            "init_dim": 3,
+            "obs_dim": 10,
             "ode_layer": 3,
             "rnn_layers": 1,
             "rnn_bidirection": true,
@@ -22,7 +22,7 @@
         "data_set": "BouncingBallDataLoader",
         "data_dir": "data/bouncing_ball",
         "data_name": "mixed_gravity_8",
-        "num_workers": 0,
+        "num_workers": 1,
         "k_shot": 3
     },
 
@@ -30,8 +30,7 @@
         "type": "Adam",
         "args": {
             "lr": 1e-3,
-            "weight_decay": 1e-5,
-            "amsgrad": true,
+            "amsgrad": false,
             "betas": [0.9, 0.999]
         }
     },
@@ -50,6 +49,7 @@
 
         "save_period": 50,
         "loss_type": "mse",
+        "domain": true,
 
         "monitor": "min val_loss",
         "early_stop": 50,
@@ -57,17 +57,18 @@
         "min_annealing_factor": 0.0,
         "anneal_update": 1000,
 
-        "total_len": 60,
+        "total_len": 20,
         "reverse": false,
 
-        "lambda": 10,
+        "lambda": 1,
         "r1": 1,
         "r2": 1,
         "r3": 1
     },
     "evaluating": {
-        "total_len": 60,
-        "reverse": false
+        "total_len": 20,
+        "reverse": false,
+        "domain": true
     },
     
     "best_model": "m_best"

@@ -39,6 +39,7 @@ class BayesianFilter(BaseModel):
                  transition_dim,
                  rnn_dim,
                  obs_dim,
+                 init_dim,
                  rnn_type,
                  rnn_layers,
                  rnn_bidirection,
@@ -52,6 +53,7 @@ class BayesianFilter(BaseModel):
         self.transition_dim = transition_dim
         self.rnn_dim = rnn_dim
         self.obs_dim = obs_dim
+        self.init_dim = init_dim
         self.rnn_type = rnn_type
         self.rnn_layers = rnn_layers
         self.rnn_bidirection = rnn_bidirection
@@ -74,7 +76,7 @@ class BayesianFilter(BaseModel):
                                               bd=rnn_bidirection, nonlin='tanh',
                                               rnn_type=rnn_type,
                                               reverse_input=reverse_rnn_input)
-        self.init_aggregator = Aggregator(rnn_dim, z_dim, obs_dim)
+        self.init_aggregator = Aggregator(rnn_dim, z_dim, init_dim)
 
         # generative model
         self.transition = Transition(z_dim, transition_dim,
@@ -104,9 +106,14 @@ class BayesianFilter(BaseModel):
         z_prev = self.correction(s_x[:, 0, :], z_0)
         z_[:, 0, :] = z_prev
 
-        for t in range(1, T):
+        for t in range(1, self.obs_dim):
             zt_ = self.transition(z_prev)
             zt = self.correction(s_x[:, t, :], zt_)
+            z_prev = zt
+            z_[:, t, :] = zt
+
+        for t in range(self.obs_dim, T):
+            zt = self.transition(z_prev)
             z_prev = zt
             z_[:, t, :] = zt
         return z_
@@ -118,7 +125,7 @@ class BayesianFilter(BaseModel):
         x = x.view(batch_size, T, self.input_dim**2)
         s_x = self.embedding(x)
 
-        z_0, mu_0, var_0 = self.latent_initialization(s_x[:, :self.obs_dim, :])
+        z_0, mu_0, var_0 = self.latent_initialization(s_x[:, :self.init_dim, :])
         z_ = self.latent_dynamics(T, z_0, s_x)
         x_ = self.emission(z_)
         x_ = x_.view(batch_size, T, self.input_dim, self.input_dim)
@@ -133,8 +140,8 @@ class MetaDynamics(BaseModel):
                  emission_dim,
                  transition_dim,
                  rnn_dim,
-                 total_dim,
                  obs_dim,
+                 init_dim,
                  rnn_type,
                  rnn_layers,
                  rnn_bidirection,
@@ -147,8 +154,8 @@ class MetaDynamics(BaseModel):
         self.emission_dim = emission_dim
         self.transition_dim = transition_dim
         self.rnn_dim = rnn_dim
-        self.total_dim = total_dim
         self.obs_dim = obs_dim
+        self.init_dim = init_dim
         self.rnn_type = rnn_type
         self.rnn_layers = rnn_layers
         self.rnn_bidirection = rnn_bidirection
@@ -171,7 +178,7 @@ class MetaDynamics(BaseModel):
                                       bd=rnn_bidirection, nonlin='tanh',
                                       rnn_type=rnn_type,
                                       reverse_input=reverse_rnn_input)
-        self.aggregator = Aggregator(rnn_dim, z_dim, total_dim, stochastic=False)
+        self.aggregator = Aggregator(rnn_dim, z_dim, obs_dim, stochastic=False)
         self.mu = nn.Linear(z_dim, z_dim)
         self.var = nn.Linear(z_dim, z_dim)
         # self.act_var = nn.Softplus()
@@ -185,13 +192,14 @@ class MetaDynamics(BaseModel):
                                               bd=rnn_bidirection, nonlin='tanh',
                                               rnn_type=rnn_type,
                                               reverse_input=reverse_rnn_input)
-        self.init_aggregator = Aggregator(rnn_dim, z_dim, obs_dim)
+        self.init_aggregator = Aggregator(rnn_dim, z_dim, init_dim)
 
         # generative model
         self.transition = Transition(z_dim, transition_dim,
                                      identity_init=True,
                                      domain=True,
                                      stochastic=False)
+        self.correction = Correction(z_dim, rnn_dim, stochastic=False)
         self.emission = Emission(z_dim, emission_dim, input_dim**2)
 
     def reparameterization(self, mu, var):
@@ -211,7 +219,7 @@ class MetaDynamics(BaseModel):
     def latent_domain(self, D_ss):
         D_z_c = []
         for s in D_ss:
-            s_rnn = self.seq_encoder(s[:, :self.total_dim, :])
+            s_rnn = self.seq_encoder(s[:, :self.obs_dim, :])
             z_c_i = self.aggregator(s_rnn)
             D_z_c.append(z_c_i)
         
@@ -223,13 +231,19 @@ class MetaDynamics(BaseModel):
         var = self.act_var(var)
         return mu, var
 
-    def latent_dynamics(self, T, z_c, z_0):
+    def latent_dynamics(self, T, z_c, z_0, s):
         batch_size = z_0.shape[0]
         z_ = torch.zeros([batch_size, T, self.z_dim]).to(device)
         z_prev = z_0
         z_[:, 0, :] = z_0
 
-        for t in range(1, T):
+        for t in range(1, self.obs_dim):
+            zt_ = self.transition(z_prev, z_c)
+            zt = self.correction(s[:, t, :], zt_)
+            z_prev = zt
+            z_[:, t, :] = zt
+        
+        for t in range(self.obs_dim, T):
             zt = self.transition(z_prev, z_c)
             z_prev = zt
             z_[:, t, :] = zt
@@ -253,18 +267,18 @@ class MetaDynamics(BaseModel):
         # initial condition
         x = x.view(batch_size, T, self.input_dim**2)
         s_x = self.embedding(x)
-        z_0, mu_0, var_0 = self.latent_initialization(s_x[:, :self.obs_dim, :])
+        z_0, mu_0, var_0 = self.latent_initialization(s_x[:, :self.init_dim, :])
 
         # Meta-model-based dynamics on target set
-        z_ = self.latent_dynamics(T, z_c, z_0)
+        z_ = self.latent_dynamics(T, z_c, z_0, s_x)
         x_ = self.emission(z_)
         x_ = x_.view(batch_size, T, self.input_dim, self.input_dim)
 
         # Meta-model based dynamics on context set
         D_, D_mu0, D_var0 = [], [], []
         for i in range(K):
-            D_z0_i, D_mu0_i, D_var0_i= self.latent_initialization(D_ss[i][:, :self.obs_dim, :])
-            D_z = self.latent_dynamics(T, z_c, D_z0_i)
+            D_z0_i, D_mu0_i, D_var0_i= self.latent_initialization(D_ss[i][:, :self.init_dim, :])
+            D_z = self.latent_dynamics(T, z_c, D_z0_i, D_ss[i])
             D_x_i = self.emission(D_z)
 
             D_x_i = D_x_i.view(batch_size, -1, T, self.input_dim, self.input_dim)
@@ -302,7 +316,7 @@ class MetaDynamics(BaseModel):
         # initial condition
         x = x.view(batch_size, T, self.input_dim**2)
         s_x = self.embedding(x)
-        z_0, mu_0, var_0 = self.latent_initialization(s_x[:, :self.obs_dim, :])
+        z_0, mu_0, var_0 = self.latent_initialization(s_x[:, :self.init_dim, :])
 
         # Meta-model-based dynamics on target set
         z_ = self.latent_dynamics(T, z_c, z_0)
@@ -317,7 +331,7 @@ class MetaDynamics_LatentODE(BaseModel):
                  input_dim,
                  latent_dim,
                  emission_dim,
-                 total_dim,
+                 init_dim,
                  obs_dim,
                  ode_layer,
                  rnn_layers,
@@ -328,7 +342,7 @@ class MetaDynamics_LatentODE(BaseModel):
         self.input_dim = input_dim
         self.latent_dim = latent_dim
         self.emission_dim = emission_dim
-        self.total_dim = total_dim
+        self.init_dim = init_dim
         self.obs_dim = obs_dim
         self.ode_layer = ode_layer
         self.rnn_layers = rnn_layers
@@ -376,7 +390,7 @@ class MetaDynamics_LatentODE(BaseModel):
     def latent_domain(self, D_ss):
         D_z_c = []
         for s in D_ss:
-            z_c_i = self.aggregator(s[:, :self.total_dim, :])
+            z_c_i = self.aggregator(s[:, :self.obs_dim, :])
             D_z_c.append(z_c_i)
         
         z_c = sum(D_z_c) / len(D_z_c)
@@ -409,7 +423,7 @@ class MetaDynamics_LatentODE(BaseModel):
         # initial condition
         x = x.view(batch_size, T, self.input_dim**2)
         s_x = self.embedding(x)
-        z_0, mu_0, var_0 = self.latent_initialization(s_x[:, :self.obs_dim, :])
+        z_0, mu_0, var_0 = self.latent_initialization(s_x[:, :self.init_dim, :])
 
         # Meta-model-based dynamics on target set
         z_ = self.latent_dynamics(T, z_c, z_0)
@@ -419,7 +433,7 @@ class MetaDynamics_LatentODE(BaseModel):
         # Meta-model based dynamics on context set
         D_, D_mu0, D_var0 = [], [], []
         for i in range(K):
-            D_z0_i, D_mu0_i, D_var0_i= self.latent_initialization(D_ss[i][:, :self.obs_dim, :])
+            D_z0_i, D_mu0_i, D_var0_i= self.latent_initialization(D_ss[i][:, :self.init_dim, :])
             D_z = self.latent_dynamics(T, z_c, D_z0_i)
             D_x_i = self.emission(D_z)
 
@@ -457,7 +471,7 @@ class MetaDynamics_LatentODE(BaseModel):
         # initial condition
         x = x.view(batch_size, T, self.input_dim**2)
         s_x = self.embedding(x)
-        z_0, mu_0, var_0 = self.latent_initialization(s_x[:, :self.obs_dim, :])
+        z_0, mu_0, var_0 = self.latent_initialization(s_x[:, :self.init_dim, :])
 
         # Meta-model-based dynamics on target set
         z_ = self.latent_dynamics(T, z_c, z_0)
