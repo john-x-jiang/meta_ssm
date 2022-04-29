@@ -145,7 +145,6 @@ class Transition(nn.Module):
 
     def forward(self, z_t_1, z_domain=None):
         if self.domain:
-            # TODO: see if there is something wrong
             z_combine = torch.cat((z_t_1, z_domain), dim=1)
             _g_t = self.act(self.lin1(z_combine))
             g_t = self.act_weight(self.lin2(_g_t))
@@ -153,12 +152,14 @@ class Transition(nn.Module):
             h_t = self.act(self.lin4(_h_t))
             _mu = self.lin0(z_combine)
             mu = (1 - g_t) * self.lin_n(_mu) + g_t * h_t
+            mu = mu + _mu
         else:
             _g_t = self.act(self.lin1(z_t_1))
             g_t = self.act_weight(self.lin2(_g_t))
             _h_t = self.act(self.lin3(z_t_1))
             h_t = self.act(self.lin4(_h_t))
             mu = (1 - g_t) * self.lin_n(z_t_1) + g_t * h_t
+            mu = mu + z_t_1
         
         if self.stochastic:
             _var = self.lin_v(h_t)
@@ -328,22 +329,30 @@ class RnnEncoder(nn.Module):
 
 
 class Aggregator(nn.Module):
-    def __init__(self, rnn_dim, z_dim, time_dim, stochastic=True):
+    def __init__(self, rnn_dim, z_dim, time_dim, bd=True, init=False, stochastic=True):
         super().__init__()
         self.rnn_dim = rnn_dim
         self.z_dim = z_dim
         self.time_dim = time_dim
+        self.bd = bd
+        self.init = init
         self.stochastic = stochastic
         
         self.lin1 = nn.Linear(time_dim, 1)
         self.act = nn.ELU(inplace=True)
 
-        self.lin2 = nn.Linear(2 * rnn_dim, rnn_dim)
-        self.lin_m = nn.Linear(rnn_dim, z_dim)
-        self.lin_v = nn.Linear(rnn_dim, z_dim)
-        # self.lin_m.weight.data = torch.eye(z_dim)
-        # self.lin_m.bias.data = torch.zeros(z_dim)
-        # self.act_v = nn.Softplus()
+        if bd:
+            self.lin2 = nn.Linear(2 * rnn_dim, z_dim)
+        else:
+            self.lin2 = nn.Linear(rnn_dim, z_dim)
+        
+        self.lin_m = nn.Linear(z_dim, z_dim)
+        self.lin_v = nn.Linear(z_dim, z_dim)
+
+        if init:
+            self.lin_m.weight.data = torch.eye(z_dim)
+            self.lin_m.bias.data = torch.zeros(z_dim)
+        
         self.act_v = nn.Tanh()
 
     def forward(self, x):
@@ -352,10 +361,10 @@ class Aggregator(nn.Module):
         x = self.lin1(x)
         x = torch.squeeze(x)
         
-        _mu = self.lin2(x)
-        mu = self.lin_m(_mu)
+        x = self.lin2(x)
+        mu = self.lin_m(x)
         if self.stochastic:
-            _var = self.lin_v(_mu)
+            _var = self.lin_v(x)
             _var = torch.clamp(_var, min=-100, max=85)
             var = self.act_v(_var)
             return mu, var
@@ -381,14 +390,6 @@ class ODE_RNN(nn.Module):
             self.acts.append(get_act('leaky_relu') if i < ode_layer else get_act('linear'))
             self.layers.append(nn.Linear(n_in, n_out, device=device))
             self.layer_norms.append(nn.LayerNorm(n_out, device=device) if True and i < ode_layer else nn.Identity())
-        # self.ode_func = nn.ModuleList()
-        # self.ode_func.append(nn.Linear(latent_dim, 2 * latent_dim))
-        # for i in range(ode_layer - 2):
-        #     self.ode_func.append(nn.Linear(2 * latent_dim, 2 * latent_dim))
-        # self.ode_func.append(nn.Linear(2 * latent_dim, latent_dim))
-
-        # self.act = nn.ELU(inplace=True)
-        # self.act_last = nn.Tanh()
 
         self.lin_m = nn.Linear(latent_dim, latent_dim)
         if stochastic:
@@ -406,8 +407,6 @@ class ODE_RNN(nn.Module):
                 weight_init.orthogonal_(w)
     
     def ode_solver(self, t, x):
-        # for idx, layers in enumerate(self.ode_func):
-        #     z = self.act(layers(z))
         for norm, a, layer in zip(self.layer_norms, self.acts, self.layers):
             x = a(norm(layer(x)))
         return x
@@ -457,14 +456,6 @@ class Transition_ODE(nn.Module):
             self.acts.append(get_act('leaky_relu') if i < ode_layer else get_act('linear'))
             self.layers.append(nn.Linear(n_in, n_out, device=device))
             self.layer_norms.append(nn.LayerNorm(n_out, device=device) if True and i < ode_layer else nn.Identity())
-        # self.ode_func = nn.ModuleList()
-        # self.ode_func.append(nn.Linear(latent_dim, 2 * latent_dim))
-        # for i in range(ode_layer - 2):
-        #     self.ode_func.append(nn.Linear(2 * latent_dim, 2 * latent_dim))
-        # self.ode_func.append(nn.Linear(2 * latent_dim, latent_dim))
-
-        # self.act = nn.ELU(inplace=True)
-        # self.act_last = nn.Tanh()
 
         if domain:
             self.combine = nn.Linear(2 * latent_dim, latent_dim)
@@ -475,9 +466,6 @@ class Transition_ODE(nn.Module):
             self.act_v = nn.Tanh()
     
     def ode_solver(self, t, x):
-        # z = x.contiguous()
-        # for idx, layers in enumerate(self.ode_func):
-        #     z = self.act(layers(z))
         for norm, a, layer in zip(self.layer_norms, self.acts, self.layers):
             x = a(norm(layer(x)))
         return x

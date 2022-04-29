@@ -59,7 +59,7 @@ def evaluate_epoch(model, data_loader, metrics, exp_dir, hparams, eval_config, d
             if domain:
                 x_, D_, mu_c, var_c, mu_t, var_t, mu_0, var_0, D_mu0, D_var0 = model(inputs, inputs_D)
             else:
-                x_, mu_0, var_0 = model(inputs)
+                x_, mu_0, var_0, mu_c, var_c = model(inputs)
             n_steps += 1
             
             if torch.isnan(x_).any():
@@ -164,7 +164,7 @@ def prediction_epoch(model, eval_data_loader, pred_data_loader, metrics, exp_dir
             if domain:
                 x_, D_, mu_c, var_c, mu_t, var_t, mu_0, var_0, D_mu0, D_var0 = model(inputs, inputs_D)
             else:
-                x_, mu_0, var_0 = model(inputs)
+                x_, mu_0, var_0, mu_c, var_c = model(inputs)
             n_steps += 1
             
             if torch.isnan(x_).any():
