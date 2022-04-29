@@ -186,13 +186,20 @@ class LatentODE(BaseModel):
             nn.ELU()
         )
 
+        # domain
+        self.aggregator = ODE_RNN(latent_dim, ode_layer=ode_layer, stochastic=False)
+        self.mu = nn.Linear(latent_dim, latent_dim)
+        self.var = nn.Linear(latent_dim, latent_dim)
+        self.act_var = nn.Tanh()
+
         # initialization
-        self.initalization = ODE_RNN(latent_dim, rnn_layer=1, drop_rate=0.0,
-                                     bd=rnn_bidirection, ode_layer=ode_layer)
+        self.initalization = ODE_RNN(latent_dim, ode_layer=ode_layer)
+        # self.init = nn.Linear(latent_dim, latent_dim)
+        # self.init_aggregator = Aggregator(latent_dim, latent_dim, init_dim, bd=False, init=True)
 
         # generative model
         self.transition = Transition_ODE(latent_dim, ode_layer=ode_layer,
-                                         domain=False,
+                                         domain=True,
                                          stochastic=False)
         self.emission = Emission(latent_dim, emission_dim, input_dim**2)
 
@@ -208,26 +215,42 @@ class LatentODE(BaseModel):
         z_0 = self.reparameterization(mu_0, var_0)
         return z_0, mu_0, var_0
 
-    def latent_dynamics(self, T, z_0):
+        # _z_0 = self.init(y)
+        # mu_0, var_0 = self.init_aggregator(_z_0)
+        # z_0 = self.reparameterization(mu_0, var_0)
+        # return z_0, mu_0, var_0
+
+    def latent_domain(self, s):
+        z_c = self.aggregator(s[:, :self.obs_dim, :])
+        mu = self.mu(z_c)
+        var = self.var(z_c)
+        mu = torch.clamp(mu, min=-100, max=85)
+        var = torch.clamp(var, min=-100, max=85)
+        var = self.act_var(var)
+        z = self.reparameterization(mu, var)
+        return z, mu, var
+
+    def latent_dynamics(self, T, z_0, z_c):
         batch_size = z_0.shape[0]
-        z_ = self.transition(T, z_0)
+        z_ = self.transition(T, z_0, z_c)
         return z_
 
     def forward(self, x):
         T = x.size(1)
         batch_size = x.size(0)
 
-        # initial condition
+        # condition
         x = x.view(batch_size, T, self.input_dim**2)
         s_x = self.embedding(x)
         z_0, mu_0, var_0 = self.latent_initialization(s_x[:, :self.init_dim, :])
-        import ipdb; ipdb.set_trace()
-        # Meta-model-based dynamics on target set
-        z_ = self.latent_dynamics(T, z_0)
+        z_c, mu_c, var_c = self.latent_domain(s_x)
+
+        # dynamics on target set
+        z_ = self.latent_dynamics(T, z_0, z_c)
         x_ = self.emission(z_)
         x_ = x_.view(batch_size, T, self.input_dim, self.input_dim)
 
-        return x_, mu_0, var_0
+        return x_, mu_0, var_0, mu_c, var_c
 
 
 class MetaDynamics(BaseModel):
@@ -443,13 +466,11 @@ class MetaDynamics_LatentODE(BaseModel):
         )
 
         # domain
-        self.aggregator = ODE_RNN(latent_dim, rnn_layer=1, drop_rate=0.0, bd=rnn_bidirection,
-                                  ode_layer=ode_layer, stochastic=False)
+        self.aggregator = ODE_RNN(latent_dim, ode_layer=ode_layer, stochastic=False)
         self.mu = nn.Linear(latent_dim, latent_dim)
         self.var = nn.Linear(latent_dim, latent_dim)
         # initialization
-        self.initalization = ODE_RNN(latent_dim, rnn_layer=1, drop_rate=0.0,
-                                     bd=rnn_bidirection, ode_layer=ode_layer)
+        self.initalization = ODE_RNN(latent_dim, ode_layer=ode_layer)
 
         # generative model
         self.transition = Transition_ODE(latent_dim, ode_layer=ode_layer,
@@ -460,7 +481,6 @@ class MetaDynamics_LatentODE(BaseModel):
     def reparameterization(self, mu, var):
         if not self.sample:
             return mu
-        # std = torch.sqrt(var)
         std = torch.exp(0.5 * var)
         eps = torch.randn_like(std)
         return mu + eps * std
@@ -483,7 +503,7 @@ class MetaDynamics_LatentODE(BaseModel):
         var = torch.clamp(var, min=-100, max=85)
         return mu, var
 
-    def latent_dynamics(self, T, z_c, z_0):
+    def latent_dynamics(self, T, z_0, z_c):
         batch_size = z_0.shape[0]
         z_ = self.transition(T, z_0, z_c)
         return z_
@@ -509,7 +529,7 @@ class MetaDynamics_LatentODE(BaseModel):
         z_0, mu_0, var_0 = self.latent_initialization(s_x[:, :self.init_dim, :])
 
         # Meta-model-based dynamics on target set
-        z_ = self.latent_dynamics(T, z_c, z_0)
+        z_ = self.latent_dynamics(T, z_0, z_c)
         x_ = self.emission(z_)
         x_ = x_.view(batch_size, T, self.input_dim, self.input_dim)
 

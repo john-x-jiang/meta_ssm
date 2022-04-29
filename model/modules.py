@@ -373,8 +373,7 @@ class Aggregator(nn.Module):
 
 
 class ODE_RNN(nn.Module):
-    def __init__(self, latent_dim, rnn_layer=1, drop_rate=0.0, bd=False,
-                 orthogonal_init=False, ode_layer=3, stochastic=True):
+    def __init__(self, latent_dim, ode_layer=3, stochastic=True):
         super().__init__()
         self.latent_dim = latent_dim
         self.ode_layer = ode_layer
@@ -397,14 +396,6 @@ class ODE_RNN(nn.Module):
             # self.lin_m.weight.data = torch.eye(latent_dim)
             # self.lin_m.bias.data = torch.zeros(latent_dim)
             self.act_v = nn.Tanh()
-        
-        if orthogonal_init:
-            self.init_weights()
-
-    def init_weights(self):
-        for w in self.rnn.parameters():
-            if w.dim() > 1:
-                weight_init.orthogonal_(w)
     
     def ode_solver(self, t, x):
         for norm, a, layer in zip(self.layer_norms, self.acts, self.layers):
