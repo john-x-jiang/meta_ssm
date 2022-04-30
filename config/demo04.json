@@ -1,20 +1,19 @@
 {
     "exp_name": "demo",
-    "exp_id": "03",
+    "exp_id": "04",
     
     "model": {
-        "type": "RecurrentDynamics",
+        "type": "LatentODE",
         "args": {
             "input_dim": 32,
-            "latent_dim":64,
+            "latent_dim": 64,
             "num_filters": 4,
-            "obs_dim": 10,
             "init_dim": 3,
-            "rnn_type": "gru",
+            "obs_dim": 10,
+            "ode_layer": 3,
             "rnn_layers": 1,
             "rnn_bidirection": true,
             "train_init": false,
-            "reverse_rnn_input": false,
             "sample": true
         }
     },
@@ -45,7 +44,7 @@
     "batch_size": 50,
     "device": 0,
     "training": {
-        "epochs": 50,
+        "epochs": 20,
         "overfit_single_batch": false,
 
         "save_period": 50,
@@ -72,5 +71,5 @@
         "domain": false
     },
     
-    "best_model": "m_latest"
+    "best_model": "m_best"
 }

@@ -506,14 +506,57 @@ class Aggregator(nn.Module):
             return mu
 
 
-class ODE_RNN(nn.Module):
-    def __init__(self, latent_dim, ode_layer=3, stochastic=True):
+class GRU_unit(nn.Module):
+    def __init__(self, input_dim, latent_dim, num_units=100):
         super().__init__()
+        self.update_gate = nn.Sequential(
+            nn.Linear(latent_dim + input_dim, num_units),
+            nn.Tanh(),
+            nn.Linear(num_units, latent_dim),
+            nn.Sigmoid()
+        )
+        self.reset_gate = nn.Sequential(
+            nn.Linear(latent_dim + input_dim, num_units),
+            nn.Tanh(),
+            nn.Linear(num_units, latent_dim),
+            nn.Sigmoid()
+        )
+        self.new_state_net = nn.Sequential(
+            nn.Linear(latent_dim + input_dim, num_units),
+            nn.Tanh(),
+            nn.Linear(num_units, latent_dim)
+        )
+        self.init_network_weights(self.update_gate)
+        self.init_network_weights(self.reset_gate)
+        self.init_network_weights(self.new_state_net)
+
+    def init_network_weights(self, net, std = 0.1):
+        for m in net.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.normal_(m.weight, mean=0, std=std)
+                nn.init.constant_(m.bias, val=0)
+    
+    def forward(self, h, x):
+        x_cat = torch.cat([x, h], dim=1)
+        update_gate = self.update_gate(x_cat)
+        reset_gate = self.reset_gate(x_cat)
+
+        concat = torch.cat([h * reset_gate, x], dim=1)
+        new_state = self.new_state_net(concat)
+        new_x = (1 - update_gate) * new_state + update_gate * h
+
+        return new_x
+
+
+class ODE_RNN(nn.Module):
+    def __init__(self, input_dim, latent_dim, ode_layer=3):
+        super().__init__()
+        self.input_dim = input_dim
         self.latent_dim = latent_dim
         self.ode_layer = ode_layer
-        self.stochastic = stochastic
         
-        self.rnn = nn.GRUCell(input_size=latent_dim, hidden_size=latent_dim)
+        # self.rnn = nn.GRUCell(input_size=latent_dim, hidden_size=latent_dim)
+        self.rnn = GRU_unit(input_dim, latent_dim, num_units=input_dim // 2)
         
         self.layers_dim = [latent_dim] + (ode_layer - 2) * [latent_dim * 2] + [latent_dim]
         self.layers = []
@@ -523,13 +566,6 @@ class ODE_RNN(nn.Module):
             self.acts.append(get_act('leaky_relu') if i < ode_layer else get_act('linear'))
             self.layers.append(nn.Linear(n_in, n_out, device=device))
             self.layer_norms.append(nn.LayerNorm(n_out, device=device) if True and i < ode_layer else nn.Identity())
-
-        self.lin_m = nn.Linear(latent_dim, latent_dim)
-        if stochastic:
-            self.lin_v = nn.Linear(latent_dim, latent_dim)
-            # self.lin_m.weight.data = torch.eye(latent_dim)
-            # self.lin_m.bias.data = torch.zeros(latent_dim)
-            self.act_v = nn.Tanh()
     
     def ode_solver(self, t, x):
         for norm, a, layer in zip(self.layer_norms, self.acts, self.layers):
@@ -545,7 +581,7 @@ class ODE_RNN(nn.Module):
         seq_length = T * torch.ones(B).int().to(device)
         x_reverse = reverse_sequence(x, seq_length)
 
-        z_0 = torch.zeros_like(x_reverse[:, 0, :])
+        z_0 = torch.zeros([B, self.latent_dim]).to(device)
         z_0 = self.rnn(z_0, x_reverse[:, 0, :])
         for i in range(T):
             zt_ = odeint(solver, z_0, t, method='rk4', rtol=1e-5, atol=1e-7, options={'step_size': 0.5})
@@ -555,14 +591,7 @@ class ODE_RNN(nn.Module):
             z_0 = zt
         
         z_0 = z_0.view(B, -1)
-        mu = self.lin_m(z_0)
-        if self.stochastic:
-            _var = self.lin_v(z_0)
-            _var = torch.clamp(_var, min=-100, max=85)
-            var = self.act_v(_var)
-            return mu, var
-        else:
-            return mu
+        return z_0
 
 
 class Transition_ODE(nn.Module):

@@ -122,7 +122,7 @@ class LatentODE(BaseModel):
     def __init__(self,
                  input_dim,
                  latent_dim,
-                 emission_dim,
+                 num_filters,
                  init_dim,
                  obs_dim,
                  ode_layer,
@@ -133,7 +133,7 @@ class LatentODE(BaseModel):
         super().__init__()
         self.input_dim = input_dim
         self.latent_dim = latent_dim
-        self.emission_dim = emission_dim
+        self.num_filters = num_filters
         self.init_dim = init_dim
         self.obs_dim = obs_dim
         self.ode_layer = ode_layer
@@ -142,57 +142,30 @@ class LatentODE(BaseModel):
         self.train_init = train_init
         self.sample = sample
 
-        self.embedding = nn.Sequential(
-            nn.Linear(input_dim**2, 2 * input_dim**2),
-            nn.ELU(),
-            nn.Linear(2 * input_dim**2, 2 * input_dim**2),
-            nn.ELU(),
-            nn.Linear(2 * input_dim**2, latent_dim),
-            nn.ELU()
-        )
-
         # domain
-        self.aggregator = ODE_RNN(latent_dim, ode_layer=ode_layer, stochastic=False)
-        self.mu = nn.Linear(latent_dim, latent_dim)
-        self.var = nn.Linear(latent_dim, latent_dim)
-        self.act_var = nn.Tanh()
+        self.aggregator = ODE_RNN(input_dim**2, latent_dim, ode_layer=ode_layer)
+        self.gaussian = Gaussian(latent_dim, latent_dim)
 
         # initialization
-        self.initalization = ODE_RNN(latent_dim, ode_layer=ode_layer)
-        # self.init = nn.Linear(latent_dim, latent_dim)
-        # self.init_aggregator = Aggregator(latent_dim, latent_dim, init_dim, bd=False, init=True)
+        self.initial_function = LatentStateEncoder(init_dim, num_filters, 1, latent_dim)
 
         # generative model
         self.transition = Transition_ODE(latent_dim, ode_layer=ode_layer,
                                          domain=True,
                                          stochastic=False)
-        self.emission = Emission(latent_dim, emission_dim, input_dim**2)
-
-    def reparameterization(self, mu, var):
-        if not self.sample:
-            return mu
-        std = torch.exp(0.5 * var)
-        eps = torch.randn_like(std)
-        return mu + eps * std
+        self.emission = EmissionDecoder(input_dim, num_filters, 1, latent_dim)
     
-    def latent_initialization(self, y):
-        mu_0, var_0 = self.initalization(y)
-        z_0 = self.reparameterization(mu_0, var_0)
+    def latent_initialization(self, x):
+        batch_size = x.shape[0]
+        x = x.view(batch_size, self.init_dim, self.input_dim, self.input_dim)
+        z_0, mu_0, var_0 = self.initial_function(x)
         return z_0, mu_0, var_0
 
-        # _z_0 = self.init(y)
-        # mu_0, var_0 = self.init_aggregator(_z_0)
-        # z_0 = self.reparameterization(mu_0, var_0)
-        # return z_0, mu_0, var_0
-
-    def latent_domain(self, s):
-        z_c = self.aggregator(s[:, :self.obs_dim, :])
-        mu = self.mu(z_c)
-        var = self.var(z_c)
-        mu = torch.clamp(mu, min=-100, max=85)
-        var = torch.clamp(var, min=-100, max=85)
-        var = self.act_var(var)
-        z = self.reparameterization(mu, var)
+    def latent_domain(self, x):
+        batch_size = x.shape[0]
+        x = x.view(batch_size, self.obs_dim, self.input_dim * self.input_dim)
+        z_c = self.aggregator(x[:, :self.obs_dim, :])
+        mu, var, z = self.gaussian(z_c)
         return z, mu, var
 
     def latent_dynamics(self, T, z_0, z_c):
@@ -205,15 +178,13 @@ class LatentODE(BaseModel):
         batch_size = x.size(0)
 
         # condition
-        x = x.view(batch_size, T, self.input_dim**2)
-        s_x = self.embedding(x)
-        z_0, mu_0, var_0 = self.latent_initialization(s_x[:, :self.init_dim, :])
-        z_c, mu_c, var_c = self.latent_domain(s_x)
+        z_0, mu_0, var_0 = self.latent_initialization(x[:, :self.init_dim, :])
+        z_c, mu_c, var_c = self.latent_domain(x[:, :self.obs_dim, :])
 
         # dynamics on target set
         z_ = self.latent_dynamics(T, z_0, z_c)
-        x_ = self.emission(z_)
-        x_ = x_.view(batch_size, T, self.input_dim, self.input_dim)
+        z_ = z_.view(batch_size * T, -1)
+        x_ = self.emission(z_, batch_size, T)
 
         return x_, mu_0, var_0, mu_c, var_c
 
