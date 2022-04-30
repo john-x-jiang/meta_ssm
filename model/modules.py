@@ -26,9 +26,143 @@ class UnFlatten(nn.Module):
         return input.view(input.size(0), nc, self.w, self.w)
 
 
+class Gaussian(nn.Module):
+    """ Gaussian sample layer with 2 simple linear layers """
+    def __init__(self, in_dim, z_dim):
+        super().__init__()
+
+        self.mu = nn.Sequential(
+            nn.Linear(in_dim, in_dim // 2),
+            nn.LeakyReLU(0.1),
+            nn.Linear(in_dim // 2, z_dim)
+        )
+
+        self.var = nn.Sequential(
+            nn.Linear(in_dim, in_dim // 2),
+            nn.LeakyReLU(0.1),
+            nn.Linear(in_dim // 2, z_dim)
+        )
+        self.act_var = nn.Tanh()
+
+    def reparameterization(self, mu, logvar):
+        std = torch.exp(0.5 * logvar)
+        noise = torch.randn_like(std)
+        z = mu + (noise * std)
+        return z
+
+    def forward(self, x):
+        mu = self.mu(x)
+        logvar = self.var(x)
+
+        # Clamp the variance
+        if (mu < -100).any() or (mu > 85).any() or (logvar < -100).any() or (logvar > 85).any():
+            mu = torch.clamp(mu, min=-100, max=85)
+            logvar = torch.clamp(logvar, min=-100, max=85)
+            # print("Explosion in mu/logvar of component")
+        logvar = self.act_var(logvar)
+
+        # Reparameterize and sample
+        z = self.reparameterization(mu, logvar)
+        return mu, logvar, z
+
+
 """
 Generative modules
 """
+class LatentStateEncoder(nn.Module):
+    def __init__(self, time_steps, num_filters, num_channels, latent_dim, stochastic=True):
+        """
+        Holds the convolutional encoder that takes in a sequence of images and outputs the
+        initial state of the latent dynamics
+        :param time_steps: how many GT steps are used in initialization
+        :param num_filters: base convolutional filters, upscaled by 2 every layer
+        :param num_channels: how many image color channels there are
+        :param latent_dim: dimension of the latent dynamics
+        """
+        super().__init__()
+        self.time_steps = time_steps
+        self.num_channels = num_channels
+        self.stochastic = stochastic
+
+        # Encoder, q(z_0 | x_{0:time_steps})
+        self.initial_encoder = nn.Sequential(
+            nn.Conv2d(time_steps * num_channels, num_filters, kernel_size=5, stride=2, padding=(2, 2)),  # 14,14
+            nn.BatchNorm2d(num_filters),
+            nn.LeakyReLU(0.1),
+            nn.Conv2d(num_filters, num_filters * 2, kernel_size=5, stride=2, padding=(2, 2)),  # 7,7
+            nn.BatchNorm2d(num_filters * 2),
+            nn.LeakyReLU(0.1),
+            nn.Conv2d(num_filters * 2, num_filters, kernel_size=5, stride=2, padding=(2, 2)),
+            nn.Tanh(),
+            Flatten(),
+        )
+        if stochastic:
+            self.output = Gaussian(num_filters * 4 ** 2, latent_dim)
+        else:
+            self.output = nn.Linear(num_filters * 4 ** 2, latent_dim)
+
+    def forward(self, x):
+        """
+        Handles getting the initial state given x and saving the distributional parameters
+        :param x: input sequences [BatchSize, GenerationLen * NumChannels, H, W]
+        :return: z0 over the batch [BatchSize, LatentDim]
+        """
+        if self.stochastic:
+            z = self.initial_encoder(x[:, :self.time_steps * self.num_channels])
+            mu, var, z = self.output(z)
+            return mu, var, z
+        else:
+            z = self.initial_encoder(x[:, :self.time_steps * self.num_channels])
+            z = self.output(z)
+            return z
+
+
+class EmissionDecoder(nn.Module):
+    def __init__(self, dim, num_filters, num_channels, latent_dim):
+        """
+        Holds the convolutional decoder that takes in a batch of individual latent states and
+        transforms them into their corresponding data space reconstructions
+        """
+        super().__init__()
+        self.dim = dim
+        self.num_channels = num_channels
+
+        # Variable that holds the estimated output for the flattened convolution vector
+        self.conv_dim = num_filters * 4 ** 2
+
+        # Emission model handling z_i -> x_i
+        self.decoder = nn.Sequential(
+            # Transform latent vector into 4D tensor for deconvolution
+            nn.Linear(latent_dim, self.conv_dim),
+            nn.LeakyReLU(0.1),
+            UnFlatten(4),
+
+            # Perform de-conv to output space
+            nn.ConvTranspose2d(self.conv_dim // 16, num_filters * 8, kernel_size=4, stride=1, padding=(0, 0)),
+            nn.BatchNorm2d(num_filters * 8),
+            nn.LeakyReLU(0.1),
+            nn.ConvTranspose2d(num_filters * 8, num_filters * 4, kernel_size=5, stride=2, padding=(1, 1)),
+            nn.BatchNorm2d(num_filters * 4),
+            nn.LeakyReLU(0.1),
+            nn.ConvTranspose2d(num_filters * 4, num_filters * 2, kernel_size=5, stride=2, padding=(1, 1), output_padding=(1, 1)),
+            nn.BatchNorm2d(num_filters * 2),
+            nn.LeakyReLU(0.1),
+            nn.ConvTranspose2d(num_filters * 2, num_channels, kernel_size=5, stride=1, padding=(2, 2)),
+            nn.Sigmoid(),
+        )
+
+    def forward(self, zts, batch_size, T):
+        """
+        Handles decoding a batch of individual latent states into their corresponding data space reconstructions
+        :param zts: latent states [BatchSize * GenerationLen, LatentDim]
+        :return: data output [BatchSize, GenerationLen, NumChannels, H, W]
+        """
+        x_rec = self.decoder(zts)
+
+        # Reshape to image output
+        x_rec = x_rec.view([batch_size, T, self.num_channels, self.dim, self.dim])
+        x_rec = torch.squeeze(x_rec)
+        return x_rec
 
 
 class Emission(nn.Module):
