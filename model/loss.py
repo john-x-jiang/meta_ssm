@@ -53,8 +53,8 @@ def meta_loss(x, x_, D, D_, mu_c, var_c, mu_t, var_t, mu_0, var_0, D_mu0, D_var0
     nll_raw_D = nll_loss(D_, D, loss_type)
     nll_m_D = nll_raw_D.sum() / B
 
-    # likelihood = (nll_m + nll_m_D) / (K + 1)
-    likelihood = nll_m
+    likelihood = (nll_m + nll_m_D) / (K + 1)
+    # likelihood = nll_m
 
     # domain condition
     kl_raw_c = kl_div_stn(mu_c, var_c)
@@ -70,8 +70,8 @@ def meta_loss(x, x_, D, D_, mu_c, var_c, mu_t, var_t, mu_0, var_0, D_mu0, D_var0
     kl_raw_D = kl_div_stn(D_mu0, D_var0)
     kl_m_D = kl_raw_D.sum() / B
 
-    # kl_initial = (kl_m_0 + kl_m_D) / (K + 1)
-    kl_initial = kl_m_0
+    kl_initial = (kl_m_0 + kl_m_D) / (K + 1)
+    # kl_initial = kl_m_0
 
     loss = (r1 * kl_initial + r2 * kl_m_c + r3 * kl_m_c_t) * kl_factor + likelihood
 

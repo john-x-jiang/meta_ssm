@@ -35,9 +35,11 @@ class RecurrentDynamics(BaseModel):
     def __init__(self,
                  input_dim,
                  latent_dim,
-                 num_filters,
+                 obs_filters,
                  obs_dim,
+                 init_filters,
                  init_dim,
+                 ems_filters,
                  rnn_type,
                  rnn_layers,
                  rnn_bidirection,
@@ -47,9 +49,11 @@ class RecurrentDynamics(BaseModel):
         super().__init__()
         self.input_dim = input_dim
         self.latent_dim = latent_dim
-        self.num_filters = num_filters
+        self.obs_filters = obs_filters
         self.obs_dim = obs_dim
+        self.init_filters = init_filters
         self.init_dim = init_dim
+        self.ems_filters = ems_filters
         self.rnn_type = rnn_type
         self.rnn_layers = rnn_layers
         self.rnn_bidirection = rnn_bidirection
@@ -65,17 +69,17 @@ class RecurrentDynamics(BaseModel):
         #                               reverse_input=reverse_rnn_input)
         # self.aggregator = Aggregator(input_dim**2 // 2, latent_dim, obs_dim, stochastic=False)
         self.gaussian = Gaussian(latent_dim, latent_dim)
-        self.domain_function = LatentStateEncoder(obs_dim, num_filters, 1, latent_dim, stochastic=False)
+        self.domain_function = LatentStateEncoder(obs_dim, obs_filters, 1, latent_dim, stochastic=False)
 
         # initialization
-        self.initial_function = LatentStateEncoder(init_dim, num_filters, 1, latent_dim)
+        self.initial_function = LatentStateEncoder(init_dim, init_filters, 1, latent_dim)
 
         # generative model
         self.transition = Transition(latent_dim, latent_dim * 2,
                                      identity_init=True,
                                      domain=True,
                                      stochastic=False)
-        self.emission = EmissionDecoder(input_dim, num_filters, 1, latent_dim)
+        self.emission = EmissionDecoder(input_dim, ems_filters, 1, latent_dim)
     
     def latent_initialization(self, x):
         batch_size = x.shape[0]
@@ -192,10 +196,8 @@ class LatentODE(BaseModel):
 class MetaDynamics(BaseModel):
     def __init__(self,
                  input_dim,
-                 z_dim,
-                 emission_dim,
-                 transition_dim,
-                 rnn_dim,
+                 latent_dim,
+                 num_filters,
                  obs_dim,
                  init_dim,
                  rnn_type,
@@ -206,10 +208,8 @@ class MetaDynamics(BaseModel):
                  sample=True):
         super().__init__()
         self.input_dim = input_dim
-        self.z_dim = z_dim
-        self.emission_dim = emission_dim
-        self.transition_dim = transition_dim
-        self.rnn_dim = rnn_dim
+        self.latent_dim = latent_dim
+        self.num_filters = num_filters
         self.obs_dim = obs_dim
         self.init_dim = init_dim
         self.rnn_type = rnn_type
@@ -219,70 +219,50 @@ class MetaDynamics(BaseModel):
         self.reverse_rnn_input = reverse_rnn_input
         self.sample = sample
 
-        self.embedding = nn.Sequential(
-            nn.Linear(input_dim**2, 2 * input_dim**2),
-            nn.ELU(inplace=True),
-            nn.Linear(2 * input_dim**2, 2 * input_dim**2),
-            nn.ELU(inplace=True),
-            nn.Linear(2 * input_dim**2, rnn_dim),
-            nn.ELU(inplace=True)
-        )
-
         # domain
-        self.seq_encoder = RnnEncoder(rnn_dim, rnn_dim,
-                                      n_layer=rnn_layers, drop_rate=0.0,
-                                      bd=rnn_bidirection, nonlin='tanh',
-                                      rnn_type=rnn_type,
-                                      reverse_input=reverse_rnn_input)
-        self.aggregator = Aggregator(rnn_dim, z_dim, obs_dim, stochastic=False)
-        self.mu = nn.Linear(z_dim, z_dim)
-        self.var = nn.Linear(z_dim, z_dim)
-        self.act_var = nn.Tanh()
-        # self.mu.weight.data = torch.eye(z_dim)
-        # self.mu.bias.data = torch.zeros(z_dim)
+        # self.seq_encoder = RnnEncoder(input_dim**2, input_dim**2 // 2,
+        #                               n_layer=rnn_layers, drop_rate=0.0,
+        #                               bd=rnn_bidirection, nonlin='tanh',
+        #                               rnn_type=rnn_type,
+        #                               reverse_input=reverse_rnn_input)
+        # self.aggregator = Aggregator(input_dim**2 // 2, latent_dim, obs_dim, stochastic=False)
+        self.gaussian = Gaussian(latent_dim, latent_dim)
+        self.domain_function = LatentStateEncoder(obs_dim, num_filters, 1, latent_dim, stochastic=False)
 
         # initialization
-        self.init = nn.Linear(rnn_dim, z_dim)
-        self.init_aggregator = Aggregator(z_dim, z_dim, init_dim, bd=False, init=True)
+        self.initial_function = LatentStateEncoder(init_dim, num_filters, 1, latent_dim)
 
         # generative model
-        self.transition = Transition(z_dim, transition_dim,
+        self.transition = Transition(latent_dim, latent_dim * 2,
                                      identity_init=True,
                                      domain=True,
                                      stochastic=False)
-        self.emission = Emission(z_dim, emission_dim, input_dim**2)
-
-    def reparameterization(self, mu, var):
-        if not self.sample:
-            return mu
-        std = torch.exp(0.5 * var)
-        eps = torch.randn_like(std)
-        return mu + eps * std
+        self.emission = EmissionDecoder(input_dim, num_filters, 1, latent_dim)
     
-    def latent_initialization(self, y):
-        _z_0 = self.init(y)
-        mu_0, var_0 = self.init_aggregator(_z_0)
-        z_0 = self.reparameterization(mu_0, var_0)
+    def latent_initialization(self, x):
+        batch_size = x.shape[0]
+        x = x.view(batch_size, self.init_dim, self.input_dim, self.input_dim)
+        z_0, mu_0, var_0 = self.initial_function(x)
         return z_0, mu_0, var_0
 
-    def latent_domain(self, D_ss):
+    def latent_domain(self, D, K):
+        batch_size = D.shape[0]
         D_z_c = []
-        for s in D_ss:
-            s_rnn = self.seq_encoder(s[:, :self.obs_dim, :])
-            z_c_i = self.aggregator(s_rnn)
+        for k in range(K):
+            x_i = D[:, k, :]
+            # x_i = x_i.view(batch_size, self.obs_dim, self.input_dim * self.input_dim)
+            # s_rnn = self.seq_encoder(x_i)
+            # z_c_i = self.aggregator(s_rnn)
+            z_c_i = self.domain_function(x_i)
             D_z_c.append(z_c_i)
         
         z_c = sum(D_z_c) / len(D_z_c)
-        mu = self.mu(z_c)
-        var = self.var(z_c)
-        mu = torch.clamp(mu, min=-100, max=85)
-        var = torch.clamp(var, min=-100, max=85)
-        var = self.act_var(var)
-        return mu, var
+        mu, var, z = self.gaussian(z_c)
+        return z, mu, var
 
-    def latent_dynamics(self, T, z_c, z_0, s):
+    def latent_dynamics(self, T, z_c, z_0):
         batch_size = z_0.shape[0]
-        z_ = torch.zeros([batch_size, T, self.z_dim]).to(device)
+        z_ = torch.zeros([batch_size, T, self.latent_dim]).to(device)
         z_prev = z_0
         z_[:, 0, :] = z_0
         
@@ -298,35 +278,27 @@ class MetaDynamics(BaseModel):
 
         # domain condition
         K = D.shape[1]
-        D_ss = []
-        for i in range(K):
-            D_i = D[:, i, :].view(batch_size, T, self.input_dim**2)
-            D_si = self.embedding(D_i)
-            D_ss.append(D_si)
-        
-        mu_c, var_c = self.latent_domain(D_ss)
-        z_c = self.reparameterization(mu_c, var_c)
-
+        x = x.view(batch_size, 1, T, self.input_dim, self.input_dim)
+        D_cat = torch.cat([D, x], dim=1)
+        z_c, mu_c, var_c = self.latent_domain(D_cat[:, :, :self.obs_dim, :], K + 1)
+        x = x.view(batch_size, T, self.input_dim, self.input_dim)
         # initial condition
-        x = x.view(batch_size, T, self.input_dim**2)
-        s_x = self.embedding(x)
-        z_0, mu_0, var_0 = self.latent_initialization(s_x[:, :self.init_dim, :])
-
-        # Meta-model-based dynamics on target set
-        z_ = self.latent_dynamics(T, z_c, z_0, s_x)
-        x_ = self.emission(z_)
-        x_ = x_.view(batch_size, T, self.input_dim, self.input_dim)
+        z_0, mu_0, var_0 = self.latent_initialization(x[:, :self.init_dim, :])
+        z_ = self.latent_dynamics(T, z_0, z_c)
+        z_ = z_.view(batch_size * T, -1)
+        x_ = self.emission(z_, batch_size, T)
 
         # Meta-model based dynamics on context set
         D_, D_mu0, D_var0 = [], [], []
         for i in range(K):
-            D_z0_i, D_mu0_i, D_var0_i= self.latent_initialization(D_ss[i][:, :self.init_dim, :])
-            D_z = self.latent_dynamics(T, z_c, D_z0_i, D_ss[i])
-            D_x_i = self.emission(D_z)
+            D_z0_i, D_mu0_i, D_var0_i= self.latent_initialization(D[:, i, :self.init_dim, :])
+            D_z = self.latent_dynamics(T, D_z0_i, z_c)
+            D_z = D_z.view(batch_size * T, -1)
+            D_x_i = self.emission(D_z, batch_size, T)
 
             D_x_i = D_x_i.view(batch_size, -1, T, self.input_dim, self.input_dim)
-            D_mu0_i = D_mu0_i.view(batch_size, -1, self.z_dim)
-            D_var0_i = D_var0_i.view(batch_size, -1, self.z_dim)
+            D_mu0_i = D_mu0_i.view(batch_size, -1, self.latent_dim)
+            D_var0_i = D_var0_i.view(batch_size, -1, self.latent_dim)
             D_.append(D_x_i)
             D_mu0.append(D_mu0_i)
             D_var0.append(D_var0_i)
@@ -335,8 +307,10 @@ class MetaDynamics(BaseModel):
         D_var0 = torch.cat(D_var0, dim=1)
 
         # Regularization on context and target sets
-        D_ss.append(s_x)
-        mu_t, var_t = self.latent_domain(D_ss)
+        # x = x.view(batch_size, 1, T, self.input_dim, self.input_dim)
+        # D_cat = torch.cat([D, x], dim=1)
+        # _, mu_t, var_t = self.latent_domain(D_cat[:, :, :self.obs_dim, :], K + 1)
+        mu_t, var_t = torch.zeros_like(mu_c), torch.zeros_like(var_c)
 
         return x_, D_, mu_c, var_c, mu_t, var_t, mu_0, var_0, D_mu0, D_var0
 
