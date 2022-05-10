@@ -19,6 +19,8 @@ def train_driver(model, checkpt, epoch_start, optimizer, lr_scheduler, \
     train_loader, valid_loader, loss, metrics, hparams, exp_dir):
     kl_m_c_t, kl_m_ct_t, kl_initial_t, likelihood_t, train_loss = [], [], [], [], []
     kl_m_c_e, kl_m_ct_e, kl_initial_e, likelihood_e, val_loss = [], [], [], [], []
+    likelihood_r_t, likelihood_g_t = [], []
+    likelihood_r_e, likelihood_g_e = [], []
 
     train_config = dict(hparams.training)
     monitor_mode, monitor_metric = train_config['monitor'].split()
@@ -33,6 +35,8 @@ def train_driver(model, checkpt, epoch_start, optimizer, lr_scheduler, \
         kl_m_ct_t, kl_m_ct_e = checkpt['kl_m_ct_t'], checkpt['kl_m_ct_e']
         kl_initial_t, kl_initial_e = checkpt['kl_initial_t'], checkpt['kl_initial_e']
         likelihood_t, likelihood_e = checkpt['likelihood_t'], checkpt['likelihood_e']
+        likelihood_r_t, likelihood_g_t = checkpt['likelihood_r_t'], checkpt['likelihood_g_t']
+        likelihood_r_e, likelihood_g_e = checkpt['likelihood_r_e'], checkpt['likelihood_g_e']
 
         metric_err = checkpt[monitor_metric][-1]
         not_improved_count = checkpt['not_improved_count']
@@ -40,11 +44,11 @@ def train_driver(model, checkpt, epoch_start, optimizer, lr_scheduler, \
     for epoch in range(epoch_start, train_config['epochs'] + 1):
         ts = time.time()
         # train epoch
-        kl_m_c_loss_t, kl_m_ct_loss_t, kl_initial_loss_t, likelihood_loss_t, total_loss_t = \
+        kl_m_c_loss_t, kl_m_ct_loss_t, kl_initial_loss_t, likelihood_loss_t, likelihood_r_loss_t, likelihood_g_loss_t, total_loss_t = \
             train_epoch(model, epoch, loss, optimizer, train_loader, hparams)
         
         # valid epoch
-        kl_m_c_loss_e, kl_m_ct_loss_e, kl_initial_loss_e, likelihood_loss_e, total_loss_e = \
+        kl_m_c_loss_e, kl_m_ct_loss_e, kl_initial_loss_e, likelihood_loss_e, likelihood_r_loss_e, likelihood_g_loss_e, total_loss_e = \
             valid_epoch(model, epoch, loss, valid_loader, hparams)
         te = time.time()
 
@@ -60,6 +64,11 @@ def train_driver(model, checkpt, epoch_start, optimizer, lr_scheduler, \
         kl_initial_e.append(kl_initial_loss_e)
         likelihood_e.append(likelihood_loss_e)
         val_loss.append(total_loss_e)
+
+        likelihood_r_t.append(likelihood_r_loss_t)
+        likelihood_r_e.append(likelihood_r_loss_e)
+        likelihood_g_t.append(likelihood_g_loss_t)
+        likelihood_g_e.append(likelihood_g_loss_e)
 
         # Step LR
         if lr_scheduler is not None:
@@ -90,6 +99,11 @@ def train_driver(model, checkpt, epoch_start, optimizer, lr_scheduler, \
             'kl_m_ct_e': kl_m_ct_e,
             'kl_initial_e': kl_initial_e,
             'likelihood_e': likelihood_e,
+
+            'likelihood_r_t': likelihood_r_t,
+            'likelihood_r_e': likelihood_r_e,
+            'likelihood_g_t': likelihood_g_t,
+            'likelihood_g_e': likelihood_g_e,
         }
         
         # Save the latest model
@@ -147,6 +161,14 @@ def train_driver(model, checkpt, epoch_start, optimizer, lr_scheduler, \
         'likelihood': [
             likelihood_t,
             likelihood_e
+        ],
+        'likelihood_r': [
+            likelihood_r_t,
+            likelihood_r_e
+        ],
+        'likelihood_g': [
+            likelihood_g_t,
+            likelihood_g_e
         ]
     }
     save_losses(exp_dir, train_config['epochs'], losses)
@@ -159,8 +181,10 @@ def train_epoch(model, epoch, loss, optimizer, data_loader, hparams):
     reverse = train_config.get('reverse')
     loss_type = train_config.get('loss_type')
     domain = train_config.get('domain')
+    obs_len = train_config.get('obs_len')
     kl_m_c_loss, kl_m_ct_loss, kl_initial_loss = 0, 0, 0
     likelihood_loss, total_loss = 0, 0
+    likelihood_r_loss, likelihood_g_loss = 0, 0
     len_epoch = len(data_loader)
     n_steps = 0
     batch_size = hparams.batch_size
@@ -201,12 +225,13 @@ def train_epoch(model, epoch, loss, optimizer, data_loader, hparams):
         r1 = train_config.get('r1')
         r2 = train_config.get('r2')
         r3 = train_config.get('r3')
+        g = train_config.get('g')
         
         if domain:
             x_, D_, mu_c, var_c, mu_t, var_t, mu_0, var_0, D_mu0, D_var0 = model(inputs, inputs_D)
 
-            kl_m_c, kl_m_ct, kl_initial, likelihood, total = loss(x, x_, D, D_, \
-                mu_c, var_c, mu_t, var_t, mu_0, var_0, D_mu0, D_var0, kl_factor, loss_type, r1, r2, r3)
+            kl_m_c, kl_m_ct, kl_initial, likelihood, likelihood_r, likelihood_g, total = loss(x, x_, D, D_, \
+                mu_c, var_c, mu_t, var_t, mu_0, var_0, D_mu0, D_var0, kl_factor, loss_type, obs_len, r1, r2, r3, g)
         else:
             x_, mu_0, var_0, mu_c, var_c = model(inputs)
             kl_m_c, kl_initial, likelihood, total = loss(x, x_, mu_0, var_0, mu_c, var_c, kl_factor, loss_type, r1, r2)
@@ -217,6 +242,8 @@ def train_epoch(model, epoch, loss, optimizer, data_loader, hparams):
         kl_m_c_loss += kl_m_c.item()
         if domain:
             kl_m_ct_loss += kl_m_ct.item()
+            likelihood_r_loss += likelihood_r.item()
+            likelihood_g_loss += likelihood_g.item()
         total_loss += total.item()
         n_steps += 1
 
@@ -228,9 +255,11 @@ def train_epoch(model, epoch, loss, optimizer, data_loader, hparams):
     kl_m_ct_loss /= n_steps
     kl_initial_loss /= n_steps
     likelihood_loss /= n_steps
+    likelihood_r_loss /= n_steps
+    likelihood_g_loss /= n_steps
     total_loss /= n_steps
 
-    return kl_m_c_loss, kl_m_ct_loss, kl_initial_loss, likelihood_loss, total_loss
+    return kl_m_c_loss, kl_m_ct_loss, kl_initial_loss, likelihood_loss, likelihood_r_loss, likelihood_g_loss, total_loss
 
 
 def valid_epoch(model, epoch, loss, data_loader, hparams):
@@ -240,8 +269,10 @@ def valid_epoch(model, epoch, loss, data_loader, hparams):
     reverse = train_config.get('reverse')
     loss_type = train_config.get('loss_type')
     domain = train_config.get('domain')
+    obs_len = train_config.get('obs_len')
     kl_m_c_loss, kl_m_ct_loss, kl_initial_loss = 0, 0, 0
     likelihood_loss, total_loss = 0, 0
+    likelihood_r_loss, likelihood_g_loss = 0, 0
     n_steps = 0
     batch_size = hparams.batch_size
 
@@ -277,12 +308,13 @@ def valid_epoch(model, epoch, loss, data_loader, hparams):
             r1 = train_config.get('r1')
             r2 = train_config.get('r2')
             r3 = train_config.get('r3')
+            g = train_config.get('g')
             
             if domain:
                 x_, D_, mu_c, var_c, mu_t, var_t, mu_0, var_0, D_mu0, D_var0 = model(inputs, inputs_D)
 
-                kl_m_c, kl_m_ct, kl_initial, likelihood, total = loss(x, x_, D, D_, \
-                    mu_c, var_c, mu_t, var_t, mu_0, var_0, D_mu0, D_var0, kl_factor, loss_type, r1, r2, r3)
+                kl_m_c, kl_m_ct, kl_initial, likelihood, likelihood_r, likelihood_g, total = loss(x, x_, D, D_, \
+                    mu_c, var_c, mu_t, var_t, mu_0, var_0, D_mu0, D_var0, kl_factor, loss_type, obs_len, r1, r2, r3, g)
             else:
                 x_, mu_0, var_0, mu_c, var_c = model(inputs)
                 kl_m_c, kl_initial, likelihood, total = loss(x, x_, mu_0, var_0, mu_c, var_c, kl_factor, loss_type, r1, r2)
@@ -292,6 +324,8 @@ def valid_epoch(model, epoch, loss, data_loader, hparams):
             kl_m_c_loss += kl_m_c.item()
             if domain:
                 kl_m_ct_loss += kl_m_ct.item()
+                likelihood_r_loss += likelihood_r.item()
+                likelihood_g_loss += likelihood_g.item()
             total_loss += total.item()
             n_steps += 1
 
@@ -299,9 +333,11 @@ def valid_epoch(model, epoch, loss, data_loader, hparams):
     kl_m_ct_loss /= n_steps
     kl_initial_loss /= n_steps
     likelihood_loss /= n_steps
+    likelihood_r_loss /= n_steps
+    likelihood_g_loss /= n_steps
     total_loss /= n_steps
 
-    return kl_m_c_loss, kl_m_ct_loss, kl_initial_loss, likelihood_loss, total_loss
+    return kl_m_c_loss, kl_m_ct_loss, kl_initial_loss, likelihood_loss, likelihood_r_loss, likelihood_g_loss, total_loss
 
 
 def determine_annealing_factor(min_anneal_factor,
