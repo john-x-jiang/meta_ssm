@@ -165,48 +165,7 @@ class EmissionDecoder(nn.Module):
         return x_rec
 
 
-class Emission(nn.Module):
-    """
-    Parameterize the Bernoulli observation likelihood `p(x_t | z_t)`
-
-    Parameters
-    ----------
-    z_dim: int
-        Dim. of latent variables
-    emission_dim: int
-        Dim. of emission hidden units
-    input_dim: int
-        Dim. of inputs
-
-    Returns
-    -------
-        A valid probability that parameterizes the
-        Bernoulli distribution `p(x_t | z_t)`
-    """
-    def __init__(self, z_dim, emission_dim, input_dim, is_sigmoid=True):
-        super().__init__()
-        self.z_dim = z_dim
-        self.emission_dim = emission_dim
-        self.input_dim = input_dim
-        self.is_sigmoid = is_sigmoid
-
-        self.lin1 = nn.Linear(z_dim, emission_dim)
-        self.lin2 = nn.Linear(emission_dim, emission_dim)
-        self.lin3 = nn.Linear(emission_dim, input_dim)
-        
-        self.act = nn.ELU(inplace=True)
-        self.out = nn.Sigmoid()
-
-    def forward(self, z_t):
-        h1 = self.act(self.lin1(z_t))
-        h2 = self.act(self.lin2(h1))
-        if self.is_sigmoid:
-            return self.out(self.lin3(h2))
-        else:
-            return self.lin3(h2)
-
-
-class Transition(nn.Module):
+class Transition_Recurrent(nn.Module):
     """
     Parameterize the diagonal Gaussian latent transition probability
     `p(z_t | z_{t-1})`
@@ -277,9 +236,9 @@ class Transition(nn.Module):
         return nn.Parameter(torch.zeros(self.z_dim), requires_grad=trainable), \
             nn.Parameter(torch.zeros(self.z_dim), requires_grad=trainable)
 
-    def forward(self, z_t_1, z_domain=None):
+    def forward(self, z_t_1, z_c=None):
         if self.domain:
-            z_combine = torch.cat((z_t_1, z_domain), dim=1)
+            z_combine = torch.cat((z_t_1, z_c), dim=1)
             _g_t = self.act(self.lin1(z_combine))
             g_t = self.act_weight(self.lin2(_g_t))
             _h_t = self.act(self.lin3(z_combine))
@@ -304,67 +263,265 @@ class Transition(nn.Module):
             return mu
 
 
-"""
-Inference modules
-"""
+class Transition_RGN(nn.Module):
+    def __init__(self, latent_dim, transition_dim, num_layers):
+        """ Latent dynamics function where the state is given and the next state is output """
+        super().__init__()
+        self.latent_dim = latent_dim
+        self.transition_dim = transition_dim
+        self.num_layers = num_layers
+
+        # Array that holds dimensions over hidden layers
+        self.layers_dim = [latent_dim * 2] + num_layers * [transition_dim] + [latent_dim]
+
+        # Build network layers
+        self.acts = []
+        self.layers = []
+        self.layer_norms = []
+        for i, (n_in, n_out) in enumerate(zip(self.layers_dim[:-1], self.layers_dim[1:])):
+            self.acts.append(get_act('leaky_relu') if i < num_layers else get_act('linear'))
+            self.layers.append(nn.Linear(n_in, n_out))
+            self.layer_norms.append(nn.LayerNorm(n_out) if True and i < num_layers else nn.Identity())
+
+    def forward(self, z_t_1, z_c):
+        """ Given a latent state z, output z+1 """
+        z = torch.cat((z_t_1, z_c), dim=1)
+        for norm, a, layer in zip(self.layer_norms, self.acts, self.layers):
+            z = a(norm(layer(z)))
+        return z
 
 
-class Correction(nn.Module):
+class Transition_RGN_res(nn.Module):
+    def __init__(self, latent_dim, transition_dim, num_layers):
+        """ Latent dynamics function where the state is given and the next state is output """
+        super().__init__()
+        self.latent_dim = latent_dim
+        self.transition_dim = transition_dim
+        self.num_layers = num_layers
+
+        # Array that holds dimensions over hidden layers
+        self.layers_dim = [latent_dim * 2] + num_layers * [transition_dim] + [latent_dim]
+
+        # Build network layers
+        self.acts = []
+        self.layers = []
+        self.layer_norms = []
+        for i, (n_in, n_out) in enumerate(zip(self.layers_dim[:-1], self.layers_dim[1:])):
+            self.acts.append(get_act('leaky_relu') if i < num_layers else get_act('linear'))
+            self.layers.append(nn.Linear(n_in, n_out))
+            self.layer_norms.append(nn.LayerNorm(n_out) if True and i < args.num_layers else nn.Identity())
+        
+        # Combine
+        self.combine = nn.Linear(latent_dim * 2, latent_dim)
+
+    def forward(self, z_t_1, z_c):
+        """ Given a latent state z, output z+1 """
+        z_init = torch.cat((z_t_1, z_c), dim=1)
+        for lidx, (norm, a, layer) in enumerate(zip(self.layer_norms, self.acts, self.layers)):
+            if lidx == 0:
+                z = a(norm(layer(z_init)))
+            else:
+                z = a(norm(layer(z)))
+
+        # Perform residual block
+        z_combine = self.combine(z_init)
+        z = z + z_combine
+        return z
+
+
+class Transition_LSTM(nn.Module):
+    def __init__(self, latent_dim, transition_dim):
+        # Recurrent dynamics function
+        self.dynamics_func = nn.LSTMCell(input_size=latent_dim, hidden_size=transition_dim)
+        self.dynamics_out = nn.Linear(transition_dim, latent_dim)
+
+        # Combine
+        self.combine = nn.Linear(latent_dim * 2, latent_dim)
+    
+    def forward(self, T, z_0, z_c):
+        # Evaluate model forward over T to get L latent reconstructions
+        t = torch.linspace(1, T, T).to(device)
+
+        z = torch.cat((z_0, z_c), dim=1)
+        z_init = self.combine(z)
+
+        # Evaluate forward over timesteps by recurrently passing in output states
+        zt = []
+        for tidx in t:
+            if tidx == 1:
+                z_hid, c_hid = self.dynamics_func(z_init)
+            else:
+                z_hid, c_hid = self.dynamics_func(z, (z_hid, c_hid))
+
+            z = self.dynamics_out(z_hid)
+            zt.append(z)
+
+        # Stack zt and decode zts
+        zt = torch.stack(zt)
+        # TODO: dimension
+        zt = zt.contiguous().view([zt.shape[0] * zt.shape[1], -1])
+        return zt
+
+
+class Transition_ODE(nn.Module):
+    def __init__(self, latent_dim, ode_layer=2, stochastic=True):
+        super().__init__()
+        self.latent_dim = latent_dim
+        self.ode_layer = 3
+        self.stochastic = stochastic
+
+        self.layers_dim = [latent_dim] + ode_layer * [latent_dim * 2] + [latent_dim]
+        self.layers = []
+        self.acts = []
+        self.layer_norms = []
+        for i, (n_in, n_out) in enumerate(zip(self.layers_dim[:-1], self.layers_dim[1:])):
+            self.acts.append(get_act('leaky_relu') if i < ode_layer else get_act('linear'))
+            self.layers.append(nn.Linear(n_in, n_out, device=device))
+            self.layer_norms.append(nn.LayerNorm(n_out, device=device) if True and i < ode_layer else nn.Identity())
+
+        self.combine = nn.Linear(2 * latent_dim, latent_dim)
+        
+        self.lin_m = nn.Linear(latent_dim, latent_dim)
+        if stochastic:
+            self.lin_v = nn.Linear(latent_dim, latent_dim)
+            self.act_v = nn.Tanh()
+    
+    def ode_solver(self, t, x):
+        for norm, a, layer in zip(self.layer_norms, self.acts, self.layers):
+            x = a(norm(layer(x)))
+        return x
+    
+    def forward(self, T, z_0, z_c):
+        B = z_0.shape[0]
+        t = torch.linspace(0, T - 1, T).to(device)
+        solver = lambda t, x: self.ode_solver(t, x)
+
+        z_in = torch.cat([z_0, z_c], dim=1)
+        z_in = self.combine(z_in)
+
+        zt = odeint(solver, z_in, t, method='rk4', rtol=1e-5, atol=1e-7, options={'step_size': 0.5})
+        zt = zt.permute(1, 0, 2).contiguous()
+        
+        mu = self.lin_m(zt)
+        if self.stochastic:
+            _var = self.lin_v(zt)
+            _var = torch.clamp(_var, min=-100, max=85)
+            var = self.act_v(_var)
+            return mu, var
+        else:
+            return mu
+
+
+def get_act(act="relu"):
     """
-    Parameterize variational distribution `q(z_t | z_{t-1}, x_{t:T})`
-    a diagonal Gaussian distribution
+    Return torch function of a given activation function
+    :param act: activation function
+    :return: torch object
+    """
+    if act == "relu":
+        return nn.ReLU()
+    elif act == "leaky_relu":
+        return nn.LeakyReLU()
+    elif act == "sigmoid":
+        return nn.Sigmoid()
+    elif act == "tanh":
+        return nn.Tanh()
+    elif act == "linear":
+        return nn.Identity()
+    elif act == 'softplus':
+        return nn.modules.activation.Softplus()
+    elif act == 'softmax':
+        return nn.Softmax()
+    elif act == "swish":
+        return nn.SiLU()
+    else:
+        return None
+
+
+'''
+Not in use
+'''
+
+class Emission(nn.Module):
+    """
+    Parameterize the Bernoulli observation likelihood `p(x_t | z_t)`
 
     Parameters
     ----------
     z_dim: int
         Dim. of latent variables
-    rnn_dim: int
-        Dim. of RNN hidden states
-    clip: bool
-        clip the value for numerical issues
+    emission_dim: int
+        Dim. of emission hidden units
+    input_dim: int
+        Dim. of inputs
 
     Returns
     -------
-    mu: tensor (b, z_dim)
-        Mean that parameterizes the variational Gaussian distribution
-    logvar: tensor (b, z_dim)
-        Log-var that parameterizes the variational Gaussian distribution
+        A valid probability that parameterizes the
+        Bernoulli distribution `p(x_t | z_t)`
     """
-    def __init__(self, z_dim, rnn_dim, stochastic=True):
+    def __init__(self, z_dim, emission_dim, input_dim, is_sigmoid=True):
         super().__init__()
         self.z_dim = z_dim
-        self.rnn_dim = rnn_dim
-        self.stochastic = stochastic
+        self.emission_dim = emission_dim
+        self.input_dim = input_dim
+        self.is_sigmoid = is_sigmoid
 
-        self.lin1 = nn.Linear(z_dim, rnn_dim)
-        self.act = nn.Tanh()
+        self.lin1 = nn.Linear(z_dim, emission_dim)
+        self.lin2 = nn.Linear(emission_dim, emission_dim)
+        self.lin3 = nn.Linear(emission_dim, input_dim)
+        
+        self.act = nn.ELU(inplace=True)
+        self.out = nn.Sigmoid()
 
-        self.lin2 = nn.Linear(rnn_dim, z_dim)
-        self.lin_v = nn.Linear(rnn_dim, z_dim)
-
-        # self.act_var = nn.Softplus()
-        self.act_var = nn.Tanh()
-
-    def init_z_q_0(self, trainable=True):
-        return nn.Parameter(torch.zeros(self.z_dim), requires_grad=trainable)
-
-    def forward(self, h_rnn, z_t_1=None, rnn_bidirection=False):
-        """
-        z_t_1: tensor (b, z_dim)
-        h_rnn: tensor (b, rnn_dim)
-        """
-        assert z_t_1 is not None
-        h_comb_ = self.act(self.lin1(z_t_1))
-        if rnn_bidirection:
-            h_comb = (1.0 / 3) * (h_comb_ + h_rnn[:, :self.rnn_dim] + h_rnn[:, self.rnn_dim:])
+    def forward(self, z_t):
+        h1 = self.act(self.lin1(z_t))
+        h2 = self.act(self.lin2(h1))
+        if self.is_sigmoid:
+            return self.out(self.lin3(h2))
         else:
-            h_comb = 0.5 * (h_comb_ + h_rnn)
-        mu = self.lin2(h_comb)
+            return self.lin3(h2)
 
+
+class Aggregator(nn.Module):
+    def __init__(self, rnn_dim, z_dim, time_dim, bd=True, init=False, stochastic=True):
+        super().__init__()
+        self.rnn_dim = rnn_dim
+        self.z_dim = z_dim
+        self.time_dim = time_dim
+        self.bd = bd
+        self.init = init
+        self.stochastic = stochastic
+        
+        self.lin1 = nn.Linear(time_dim, 1)
+        self.act = nn.ELU(inplace=True)
+
+        if bd:
+            self.lin2 = nn.Linear(2 * rnn_dim, z_dim)
+        else:
+            self.lin2 = nn.Linear(rnn_dim, z_dim)
+        
+        self.lin_m = nn.Linear(z_dim, z_dim)
+        self.lin_v = nn.Linear(z_dim, z_dim)
+
+        if init:
+            self.lin_m.weight.data = torch.eye(z_dim)
+            self.lin_m.bias.data = torch.zeros(z_dim)
+        
+        self.act_v = nn.Tanh()
+
+    def forward(self, x):
+        B, T, _ = x.shape
+        x = x.permute(0, 2, 1).contiguous()
+        x = self.lin1(x)
+        x = torch.squeeze(x)
+        
+        x = self.lin2(x)
+        mu = self.lin_m(x)
         if self.stochastic:
-            _var = self.lin_v(h_comb)
+            _var = self.lin_v(x)
             _var = torch.clamp(_var, min=-100, max=85)
-            var = self.act_var(_var)
+            var = self.act_v(_var)
             return mu, var
         else:
             return mu
@@ -462,49 +619,65 @@ class RnnEncoder(nn.Module):
         return h_rnn
 
 
-class Aggregator(nn.Module):
-    def __init__(self, rnn_dim, z_dim, time_dim, bd=True, init=False, stochastic=True):
+class Correction(nn.Module):
+    """
+    Parameterize variational distribution `q(z_t | z_{t-1}, x_{t:T})`
+    a diagonal Gaussian distribution
+
+    Parameters
+    ----------
+    z_dim: int
+        Dim. of latent variables
+    rnn_dim: int
+        Dim. of RNN hidden states
+    clip: bool
+        clip the value for numerical issues
+
+    Returns
+    -------
+    mu: tensor (b, z_dim)
+        Mean that parameterizes the variational Gaussian distribution
+    logvar: tensor (b, z_dim)
+        Log-var that parameterizes the variational Gaussian distribution
+    """
+    def __init__(self, z_dim, rnn_dim, stochastic=True):
         super().__init__()
-        self.rnn_dim = rnn_dim
         self.z_dim = z_dim
-        self.time_dim = time_dim
-        self.bd = bd
-        self.init = init
+        self.rnn_dim = rnn_dim
         self.stochastic = stochastic
-        
-        self.lin1 = nn.Linear(time_dim, 1)
-        self.act = nn.ELU(inplace=True)
 
-        if bd:
-            self.lin2 = nn.Linear(2 * rnn_dim, z_dim)
+        self.lin1 = nn.Linear(z_dim, rnn_dim)
+        self.act = nn.Tanh()
+
+        self.lin2 = nn.Linear(rnn_dim, z_dim)
+        self.lin_v = nn.Linear(rnn_dim, z_dim)
+
+        # self.act_var = nn.Softplus()
+        self.act_var = nn.Tanh()
+
+    def init_z_q_0(self, trainable=True):
+        return nn.Parameter(torch.zeros(self.z_dim), requires_grad=trainable)
+
+    def forward(self, h_rnn, z_t_1=None, rnn_bidirection=False):
+        """
+        z_t_1: tensor (b, z_dim)
+        h_rnn: tensor (b, rnn_dim)
+        """
+        assert z_t_1 is not None
+        h_comb_ = self.act(self.lin1(z_t_1))
+        if rnn_bidirection:
+            h_comb = (1.0 / 3) * (h_comb_ + h_rnn[:, :self.rnn_dim] + h_rnn[:, self.rnn_dim:])
         else:
-            self.lin2 = nn.Linear(rnn_dim, z_dim)
-        
-        self.lin_m = nn.Linear(z_dim, z_dim)
-        self.lin_v = nn.Linear(z_dim, z_dim)
+            h_comb = 0.5 * (h_comb_ + h_rnn)
+        mu = self.lin2(h_comb)
 
-        if init:
-            self.lin_m.weight.data = torch.eye(z_dim)
-            self.lin_m.bias.data = torch.zeros(z_dim)
-        
-        self.act_v = nn.Tanh()
-
-    def forward(self, x):
-        B, T, _ = x.shape
-        x = x.permute(0, 2, 1).contiguous()
-        x = self.lin1(x)
-        x = torch.squeeze(x)
-        
-        x = self.lin2(x)
-        mu = self.lin_m(x)
         if self.stochastic:
-            _var = self.lin_v(x)
+            _var = self.lin_v(h_comb)
             _var = torch.clamp(_var, min=-100, max=85)
-            var = self.act_v(_var)
+            var = self.act_var(_var)
             return mu, var
         else:
             return mu
-
 
 class GRU_unit(nn.Module):
     def __init__(self, input_dim, latent_dim, num_units=100):
@@ -592,83 +765,3 @@ class ODE_RNN(nn.Module):
         
         z_0 = z_0.view(B, -1)
         return z_0
-
-
-class Transition_ODE(nn.Module):
-    def __init__(self, latent_dim, ode_layer=3, domain=False, stochastic=True):
-        super().__init__()
-        self.latent_dim = latent_dim
-        self.ode_layer = 3
-        self.domain = domain
-        self.stochastic = stochastic
-
-        self.layers_dim = [latent_dim] + (ode_layer - 2) * [latent_dim * 2] + [latent_dim]
-        self.layers = []
-        self.acts = []
-        self.layer_norms = []
-        for i, (n_in, n_out) in enumerate(zip(self.layers_dim[:-1], self.layers_dim[1:])):
-            self.acts.append(get_act('leaky_relu') if i < ode_layer else get_act('linear'))
-            self.layers.append(nn.Linear(n_in, n_out, device=device))
-            self.layer_norms.append(nn.LayerNorm(n_out, device=device) if True and i < ode_layer else nn.Identity())
-
-        if domain:
-            self.combine = nn.Linear(2 * latent_dim, latent_dim)
-        
-        self.lin_m = nn.Linear(latent_dim, latent_dim)
-        if stochastic:
-            self.lin_v = nn.Linear(latent_dim, latent_dim)
-            self.act_v = nn.Tanh()
-    
-    def ode_solver(self, t, x):
-        for norm, a, layer in zip(self.layer_norms, self.acts, self.layers):
-            x = a(norm(layer(x)))
-        return x
-    
-    def forward(self, T, z_0, z_c=None):
-        B = z_0.shape[0]
-        t = torch.linspace(0, T - 1, T).to(device)
-        solver = lambda t, x: self.ode_solver(t, x)
-
-        if self.domain:
-            z_in = torch.cat([z_0, z_c], dim=1)
-            z_in = self.combine(z_in)
-        else:
-            z_in = z_0
-
-        zt = odeint(solver, z_in, t, method='rk4', rtol=1e-5, atol=1e-7, options={'step_size': 0.5})
-        zt = zt.permute(1, 0, 2).contiguous()
-        
-        mu = self.lin_m(zt)
-        if self.stochastic:
-            _var = self.lin_v(zt)
-            _var = torch.clamp(_var, min=-100, max=85)
-            var = self.act_v(_var)
-            return mu, var
-        else:
-            return mu
-
-
-def get_act(act="relu"):
-    """
-    Return torch function of a given activation function
-    :param act: activation function
-    :return: torch object
-    """
-    if act == "relu":
-        return nn.ReLU()
-    elif act == "leaky_relu":
-        return nn.LeakyReLU()
-    elif act == "sigmoid":
-        return nn.Sigmoid()
-    elif act == "tanh":
-        return nn.Tanh()
-    elif act == "linear":
-        return nn.Identity()
-    elif act == 'softplus':
-        return nn.modules.activation.Softplus()
-    elif act == 'softmax':
-        return nn.Softmax()
-    elif act == "swish":
-        return nn.SiLU()
-    else:
-        return None

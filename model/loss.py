@@ -43,21 +43,19 @@ def nll_loss(x_hat, x, loss_type='bce'):
         raise NotImplemented
 
 
-def meta_loss(x, x_, mu_c, var_c, mu_t, var_t, mu_0, var_0, kl_factor, loss_type='mse', obs_len=10, r1=1, r2=1, r3=1, g=1):
+def meta_loss(x, x_, mu_c, var_c, mu_t, var_t, mu_0, var_0, kl_factor, loss_type='mse', obs_len=10, r1=1, r2=1, r3=1):
     # likelihood
     B, T = x.shape[0], x.shape[1]
     nll_raw = nll_loss(x_, x, loss_type)
     nll_0 = nll_raw[:, 0, :].sum() / B
     nll_r = nll_raw[:, 1:obs_len, :].sum() / B / (obs_len - 1)
-    if obs_len < T:
-        nll_g = nll_raw[:, obs_len:, :].sum() / B / (T - obs_len)
-    else:
-        nll_g = torch.zeros_like(nll_0)
-    nll_m = nll_0 + nll_r + nll_g * g
+    # if obs_len < T:
+    #     nll_g = nll_raw[:, obs_len:, :].sum() / B / (T - obs_len)
+    # else:
+    #     nll_g = torch.zeros_like(nll_0)
+    nll_m = nll_0 + nll_r
 
     likelihood = nll_m
-    likelihood_r = nll_r
-    likelihood_g = nll_g
 
     # domain condition
     kl_raw_c = kl_div_stn(mu_c, var_c)
@@ -74,7 +72,7 @@ def meta_loss(x, x_, mu_c, var_c, mu_t, var_t, mu_0, var_0, kl_factor, loss_type
 
     loss = (r1 * kl_initial + r2 * kl_m_c + r3 * kl_m_c_t) * kl_factor + likelihood
 
-    return kl_m_c, kl_m_c_t, kl_initial, likelihood, likelihood_r, likelihood_g, loss
+    return kl_m_c, kl_m_c_t, kl_initial, likelihood, loss
 
 
 def dmm_loss(x, x_, mu_0, var_0, mu_c, var_c, kl_factor, loss_type='mse', r1=1, r2=1):
