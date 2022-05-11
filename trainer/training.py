@@ -156,7 +156,6 @@ def train_epoch(model, epoch, loss, optimizer, data_loader, hparams):
     model.train()
     train_config = dict(hparams.training)
     total_len = train_config.get('total_len')
-    reverse = train_config.get('reverse')
     loss_type = train_config.get('loss_type')
     domain = train_config.get('domain')
     obs_len = train_config.get('obs_len')
@@ -166,30 +165,15 @@ def train_epoch(model, epoch, loss, optimizer, data_loader, hparams):
     n_steps = 0
     batch_size = hparams.batch_size
 
-    if epoch > 1:
+    if domain and epoch > 1:
         data_loader = data_loader.next()
     for idx, batch in enumerate(data_loader):
         x, D, x_state, D_state, label = batch
         if total_len is not None:
             x = x[:, :total_len]
-            D = D[:, :, :total_len]
 
         B, T = x.shape[0], x.shape[1]
-        K = D.shape[1]
         x = x.to(device)
-        D = D.to(device)
-        seq_length = total_len * torch.ones(B).int()
-        if reverse:
-            x_reversed = reverse_sequence(x, seq_length)
-            x_reversed = x_reversed.to(device)
-            inputs = x_reversed
-
-            inputs_D = torch.zeros_like(D)
-            for i in range(K):
-                inputs_D[:, i, :] = reverse_sequence(D[:, i, :], seq_length)
-        else:
-            inputs = x
-            inputs_D = D
 
         optimizer.zero_grad()
 
@@ -204,12 +188,15 @@ def train_epoch(model, epoch, loss, optimizer, data_loader, hparams):
         r3 = train_config.get('r3')
         
         if domain:
-            x_, mu_c, var_c, mu_t, var_t, mu_0, var_0 = model(inputs, inputs_D)
+            if total_len is not None:
+                D = D[:, :, :total_len]
+            D = D.to(device)
+            x_, mu_c, var_c, mu_t, var_t, mu_0, var_0 = model(x, D)
 
             kl_m_c, kl_m_ct, kl_initial, likelihood, total = loss(x, x_, \
                 mu_c, var_c, mu_t, var_t, mu_0, var_0, kl_factor, loss_type, obs_len, r1, r2, r3)
         else:
-            x_, mu_0, var_0, mu_c, var_c = model(inputs)
+            x_, mu_0, var_0, mu_c, var_c = model(x)
             kl_m_c, kl_initial, likelihood, total = loss(x, x_, mu_0, var_0, mu_c, var_c, kl_factor, loss_type, r1, r2)
         total.backward()
 
@@ -238,7 +225,6 @@ def valid_epoch(model, epoch, loss, data_loader, hparams):
     model.eval()
     train_config = hparams.training
     total_len = train_config.get('total_len')
-    reverse = train_config.get('reverse')
     loss_type = train_config.get('loss_type')
     domain = train_config.get('domain')
     obs_len = train_config.get('obs_len')
@@ -248,30 +234,15 @@ def valid_epoch(model, epoch, loss, data_loader, hparams):
     batch_size = hparams.batch_size
 
     with torch.no_grad():
-        if epoch > 1:
+        if domain and epoch > 1:
             data_loader = data_loader.next()
         for idx, batch in enumerate(data_loader):
             x, D, x_state, D_state, label = batch
             if total_len is not None:
                 x = x[:, :total_len]
-                D = D[:, :, :total_len]
 
             B, T = x.shape[0], x.shape[1]
-            K = D.shape[1]
             x = x.to(device)
-            D = D.to(device)
-            if reverse:
-                seq_length = total_len * torch.ones(B).int()
-                x_reversed = reverse_sequence(x, seq_length)
-                x_reversed = x_reversed.to(device)
-                inputs = x_reversed
-
-                inputs_D = torch.zeros_like(D)
-                for i in range(K):
-                    inputs_D[:, i, :] = reverse_sequence(D[:, i, :], seq_length)
-            else:
-                inputs = x
-                inputs_D = D
 
             r_kl = train_config['lambda']
             kl_factor = 1 * r_kl
@@ -281,12 +252,15 @@ def valid_epoch(model, epoch, loss, data_loader, hparams):
             r3 = train_config.get('r3')
             
             if domain:
-                x_, mu_c, var_c, mu_t, var_t, mu_0, var_0 = model(inputs, inputs_D)
+                if total_len is not None:
+                    D = D[:, :, :total_len]
+                D = D.to(device)
+                x_, mu_c, var_c, mu_t, var_t, mu_0, var_0 = model(x, D)
 
                 kl_m_c, kl_m_ct, kl_initial, likelihood, total = loss(x, x_, \
                     mu_c, var_c, mu_t, var_t, mu_0, var_0, kl_factor, loss_type, obs_len, r1, r2, r3)
             else:
-                x_, mu_0, var_0, mu_c, var_c = model(inputs)
+                x_, mu_0, var_0, mu_c, var_c = model(x)
                 kl_m_c, kl_initial, likelihood, total = loss(x, x_, mu_0, var_0, mu_c, var_c, kl_factor, loss_type, r1, r2)
             
             kl_initial_loss += kl_initial.item()

@@ -3,7 +3,7 @@ from torch.utils.data import DataLoader
 from torch.utils.data.dataloader import default_collate
 from torch.utils.data.sampler import SubsetRandomSampler
 from data_loader.seq_util import *
-from data_loader.boxes import PymunkEpisoticData, PymunkSetData
+from data_loader.boxes import PymunkData, PymunkEpisoticData, PymunkSetData
 
 
 class BaseDataLoader(DataLoader):
@@ -71,6 +71,31 @@ def bouncingball_collate(batch):
 
     Returns: indices of batch, images, controls
     """
+    images, states, labels = [], [], []
+
+    for b in batch:
+        _, image, state, _, label = b
+        images.append(image)
+        states.append(state)
+        labels.append(label)
+
+    images = torch.stack(images)
+    states = torch.stack(states)
+    labels = torch.stack(labels)
+
+    B, T, W, H = images.shape
+
+    return images, None, states, None, labels
+
+
+def bouncingball_episotic_collate(batch):
+    """
+    Collate function for the bouncing ball experiments
+    Args:
+        batch: given batch at this generator call
+
+    Returns: indices of batch, images, controls
+    """
     images, states, labels, \
         images_D, states_D \
          = [], [], [], [], []
@@ -90,10 +115,43 @@ def bouncingball_collate(batch):
     states_D = torch.stack(states_D)
 
     B, T, W, H = images.shape
-    seq_lengths = torch.ones(B) * T
-    seq_lengths = seq_lengths.int()
 
     return images, images_D, states, states_D, labels
+
+
+class BouncingBallDataLoader(BaseDataLoader):
+    """
+    Dataloader for the base implementation of bouncing ball w/ gravity experiments, available here:
+    https://github.com/simonkamronn/kvae
+    """
+    def __init__(self, batch_size, data_dir='data/box_data', split='train', shuffle=True,
+                 collate_fn=bouncingball_collate, num_workers=1, data_name=None, k_shot=3):
+        # assert split in ['train', 'valid', 'test', 'pred']
+
+        # Generate dataset and initialize loader
+        # config = {'dataset': 'mixed_gravity', 'out_distr': None, 'dim_u': 1}
+        config = {
+            'dataset': data_name,
+            'out_distr': 'bernoulli',
+            'dim_u': 1,
+            'k_shot': k_shot,
+            'shuffle': shuffle,
+            'is_train': split
+        }
+
+        self.init_kwargs = {
+            'batch_size': batch_size,
+            'shuffle': shuffle,
+            'validation_split': 0.0,
+            'num_workers': num_workers,
+            'collate_fn': collate_fn
+        }
+
+        self.dataset = PymunkData("{}/{}_{}.npz".format(data_dir, config['dataset'], split), config)
+        self.data_dir = data_dir
+        self.split = split
+
+        super().__init__(self.dataset, **self.init_kwargs)
 
 
 class BouncingBallSetDataLoader(BaseDataLoader):
@@ -102,7 +160,7 @@ class BouncingBallSetDataLoader(BaseDataLoader):
     https://github.com/simonkamronn/kvae
     """
     def __init__(self, batch_size, data_dir='data/box_data', split='train', shuffle=True,
-                 collate_fn=bouncingball_collate, num_workers=1, data_name=None, k_shot=3):
+                 collate_fn=bouncingball_episotic_collate, num_workers=1, data_name=None, k_shot=3):
         # assert split in ['train', 'valid', 'test', 'pred']
 
         # Generate dataset and initialize loader
@@ -146,7 +204,7 @@ class BouncingBallEpisoticDataLoader(BaseDataLoader):
     https://github.com/simonkamronn/kvae
     """
     def __init__(self, batch_size, data_dir='data/box_data', split='train', shuffle=True,
-                 collate_fn=bouncingball_collate, num_workers=1, data_name=None, k_shot=3):
+                 collate_fn=bouncingball_episotic_collate, num_workers=1, data_name=None, k_shot=3):
         # assert split in ['train', 'valid', 'test', 'pred']
 
         # Generate dataset and initialize loader

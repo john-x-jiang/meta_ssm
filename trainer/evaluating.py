@@ -23,7 +23,6 @@ def evaluate_driver(model, data_loader, metrics, hparams, exp_dir, data_tag):
 def evaluate_epoch(model, data_loader, metrics, exp_dir, hparams, eval_config, data_tag):
     model.eval()
     total_len = eval_config.get('total_len')
-    reverse = eval_config.get('reverse')
     domain = eval_config.get('domain')
     n_steps = 0
     bces, mses, vpts = None, None, None
@@ -37,29 +36,18 @@ def evaluate_epoch(model, data_loader, metrics, exp_dir, hparams, eval_config, d
             x, D, x_state, D_state, label = batch
             if total_len is not None:
                 x = x[:, :total_len]
-                D = D[:, :, :total_len]
 
             B, T = x.shape[0], x.shape[1]
             K = D.shape[1]
             x = x.to(device)
-            D = D.to(device)
-            if reverse:
-                seq_length = total_len * torch.ones(B).int()
-                x_reversed = reverse_sequence(x, seq_length)
-                x_reversed = x_reversed.to(device)
-                inputs = x_reversed
-
-                inputs_D = torch.zeros_like(D)
-                for i in range(K):
-                    inputs_D[:, i, :] = reverse_sequence(D[:, i, :], seq_length)
-            else:
-                inputs = x
-                inputs_D = D
             
             if domain:
-                x_ = model.prediction(inputs, inputs_D)
+                if total_len is not None:
+                    D = D[:, :, :total_len]
+                D = D.to(device)
+                x_ = model.prediction(x, D)
             else:
-                x_, mu_0, var_0, mu_c, var_c = model(inputs)
+                x_, mu_0, var_0, mu_c, var_c = model(x)
             n_steps += 1
             
             if torch.isnan(x_).any():
@@ -119,7 +107,6 @@ def prediction_driver(model, eval_data_loader, pred_data_loader, metrics, hparam
 def prediction_epoch(model, eval_data_loader, pred_data_loader, metrics, exp_dir, hparams, eval_config, data_tag):
     model.eval()
     total_len = eval_config.get('total_len')
-    reverse = eval_config.get('reverse')
     domain = eval_config.get('domain')
     n_steps = 0
     bces, mses, vpts = None, None, None
@@ -142,29 +129,17 @@ def prediction_epoch(model, eval_data_loader, pred_data_loader, metrics, exp_dir
 
             if total_len is not None:
                 x = x[:, :total_len]
-                D = D[:, :, :total_len]
 
             B, T = x.shape[0], x.shape[1]
-            K = D.shape[1]
             x = x.to(device)
-            D = D.to(device)
-            if reverse:
-                seq_length = total_len * torch.ones(B).int()
-                x_reversed = reverse_sequence(x, seq_length)
-                x_reversed = x_reversed.to(device)
-                inputs = x_reversed
-
-                inputs_D = torch.zeros_like(D)
-                for i in range(K):
-                    inputs_D[:, i, :] = reverse_sequence(D[:, i, :], seq_length)
-            else:
-                inputs = x
-                inputs_D = D
             
             if domain:
-                x_ = model.prediction(inputs, inputs_D)
+                if total_len is not None:
+                    D = D[:, :, :total_len]
+                D = D.to(device)
+                x_ = model.prediction(x, D)
             else:
-                x_, mu_0, var_0, mu_c, var_c = model(inputs)
+                x_, mu_0, var_0, mu_c, var_c = model(D)
             n_steps += 1
             
             if torch.isnan(x_).any():

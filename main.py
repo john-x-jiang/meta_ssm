@@ -233,7 +233,7 @@ if __name__ == '__main__':
         print('Evaluating completed!')
         print('--------------------------------------')
     elif args.stage == 3:
-        print('Stage 3: begin predicting ...')
+        print('Stage 3: begin meta evaluating ...')
         main(hparams, checkpt, stage=args.stage, eval_tag=args.eval, pred_tag=args.pred)
         print('Evaluating completed!')
         print('--------------------------------------')
