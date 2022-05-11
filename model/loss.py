@@ -43,58 +43,7 @@ def nll_loss(x_hat, x, loss_type='bce'):
         raise NotImplemented
 
 
-def meta_loss(x, x_, D, D_, mu_c, var_c, mu_t, var_t, mu_0, var_0, D_mu0, D_var0, kl_factor, loss_type='mse', obs_len=10, r1=1, r2=1, r3=1, g=1):
-    # likelihood
-    B, T = x.shape[0], x.shape[1]
-    nll_raw = nll_loss(x_, x, loss_type)
-    # nll_m = nll_raw.sum() / B
-    nll_0 = nll_raw[:, 0, :].sum() / B
-    nll_r = nll_raw[:, 1:obs_len, :].sum() / B / (obs_len - 1)
-    if obs_len < T:
-        nll_g = nll_raw[:, obs_len:, :].sum() / B / (T - obs_len)
-    else:
-        nll_g = torch.zeros_like(nll_0)
-    nll_m = nll_0 + nll_r + nll_g * g
-
-    K = D.shape[1]
-    nll_raw_D = nll_loss(D_, D, loss_type)
-    # nll_m_D = nll_raw_D.sum() / B
-    nll_0_D = nll_raw_D[:, :, 0, :].sum() / B
-    nll_r_D = nll_raw_D[:, :, 1:obs_len, :].sum() / B / (obs_len - 1)
-    if obs_len < T:
-        nll_g_D = nll_raw_D[:, :, obs_len:, :].sum() / B / (T - obs_len)
-    else:
-        nll_g_D = torch.zeros_like(nll_0)
-    nll_m_D = nll_0_D + nll_r_D + nll_g_D * g
-
-    likelihood = (nll_m + nll_m_D) / (K + 1)
-    # likelihood = nll_m
-    likelihood_r = (nll_r + nll_r_D) / (K + 1)
-    likelihood_g = (nll_g + nll_g_D) / (K + 1)
-
-    # domain condition
-    kl_raw_c = kl_div_stn(mu_c, var_c)
-    kl_m_c = kl_raw_c.sum() / B
-
-    kl_raw_c_t = kl_div(mu_c, var_c, mu_t, var_t)
-    kl_m_c_t = kl_raw_c_t.sum() / B
-
-    # initial condition
-    kl_raw_0 = kl_div_stn(mu_0, var_0)
-    kl_m_0 = kl_raw_0.sum() / B
-
-    kl_raw_D = kl_div_stn(D_mu0, D_var0)
-    kl_m_D = kl_raw_D.sum() / B
-
-    kl_initial = (kl_m_0 + kl_m_D) / (K + 1)
-    # kl_initial = kl_m_0
-
-    loss = (r1 * kl_initial + r2 * kl_m_c + r3 * kl_m_c_t) * kl_factor + likelihood
-
-    return kl_m_c, kl_m_c_t, kl_initial, likelihood, likelihood_r, likelihood_g, loss
-
-
-def meta_loss_1(x, x_, D, D_, mu_c, var_c, mu_t, var_t, mu_0, var_0, D_mu0, D_var0, kl_factor, loss_type='mse', obs_len=10, r1=1, r2=1, r3=1, g=1):
+def meta_loss(x, x_, mu_c, var_c, mu_t, var_t, mu_0, var_0, kl_factor, loss_type='mse', obs_len=10, r1=1, r2=1, r3=1, g=1):
     # likelihood
     B, T = x.shape[0], x.shape[1]
     nll_raw = nll_loss(x_, x, loss_type)

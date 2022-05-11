@@ -3,7 +3,7 @@ from torch.utils.data import DataLoader
 from torch.utils.data.dataloader import default_collate
 from torch.utils.data.sampler import SubsetRandomSampler
 from data_loader.seq_util import *
-from data_loader.boxes import PymunkEpisoticData, PymunkEpisoticData_1, PymunkSetData
+from data_loader.boxes import PymunkEpisoticData, PymunkSetData
 
 
 class BaseDataLoader(DataLoader):
@@ -157,7 +157,6 @@ class BouncingBallEpisoticDataLoader(BaseDataLoader):
             'dim_u': 1,
             'k_shot': k_shot,
             'shuffle': shuffle,
-            'is_train': split
         }
 
         self.init_kwargs = {
@@ -169,50 +168,6 @@ class BouncingBallEpisoticDataLoader(BaseDataLoader):
         }
 
         self.dataset = PymunkEpisoticData("{}/{}_{}.npz".format(data_dir, config['dataset'], split), config)
-        self.data_dir = data_dir
-        self.split = split
-
-        super().__init__(self.dataset, **self.init_kwargs)
-
-    def next(self):
-        self.dataset.split()
-        self.init_kwargs['validation_split'] = 0.0
-        return BaseDataLoader(dataset=self.dataset,
-                              batch_size=self.init_kwargs['batch_size'],
-                              shuffle=self.init_kwargs['shuffle'],
-                              validation_split=self.init_kwargs['validation_split'],
-                              num_workers=self.init_kwargs['num_workers'],
-                              collate_fn=self.init_kwargs['collate_fn'])
-
-
-class BouncingBallEpisoticDataLoader_1(BaseDataLoader):
-    """
-    Dataloader for the base implementation of bouncing ball w/ gravity experiments, available here:
-    https://github.com/simonkamronn/kvae
-    """
-    def __init__(self, batch_size, data_dir='data/box_data', split='train', shuffle=True,
-                 collate_fn=bouncingball_collate, num_workers=1, data_name=None, k_shot=3):
-        # assert split in ['train', 'valid', 'test', 'pred']
-
-        # Generate dataset and initialize loader
-        # config = {'dataset': 'mixed_gravity', 'out_distr': None, 'dim_u': 1}
-        config = {
-            'dataset': data_name,
-            'out_distr': 'bernoulli',
-            'dim_u': 1,
-            'k_shot': k_shot,
-            'shuffle': shuffle,
-        }
-
-        self.init_kwargs = {
-            'batch_size': batch_size,
-            'shuffle': shuffle,
-            'validation_split': 0.0,
-            'num_workers': num_workers,
-            'collate_fn': collate_fn
-        }
-
-        self.dataset = PymunkEpisoticData_1("{}/{}_{}.npz".format(data_dir, config['dataset'], split), config)
         self.data_dir = data_dir
         self.split = split
 

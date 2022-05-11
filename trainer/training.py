@@ -228,10 +228,10 @@ def train_epoch(model, epoch, loss, optimizer, data_loader, hparams):
         g = train_config.get('g')
         
         if domain:
-            x_, D_, mu_c, var_c, mu_t, var_t, mu_0, var_0, D_mu0, D_var0 = model(inputs, inputs_D)
+            x_, mu_c, var_c, mu_t, var_t, mu_0, var_0 = model(inputs, inputs_D)
 
-            kl_m_c, kl_m_ct, kl_initial, likelihood, likelihood_r, likelihood_g, total = loss(x, x_, D, D_, \
-                mu_c, var_c, mu_t, var_t, mu_0, var_0, D_mu0, D_var0, kl_factor, loss_type, obs_len, r1, r2, r3, g)
+            kl_m_c, kl_m_ct, kl_initial, likelihood, likelihood_r, likelihood_g, total = loss(x, x_, \
+                mu_c, var_c, mu_t, var_t, mu_0, var_0, kl_factor, loss_type, obs_len, r1, r2, r3, g)
         else:
             x_, mu_0, var_0, mu_c, var_c = model(inputs)
             kl_m_c, kl_initial, likelihood, total = loss(x, x_, mu_0, var_0, mu_c, var_c, kl_factor, loss_type, r1, r2)
@@ -311,10 +311,10 @@ def valid_epoch(model, epoch, loss, data_loader, hparams):
             g = train_config.get('g')
             
             if domain:
-                x_, D_, mu_c, var_c, mu_t, var_t, mu_0, var_0, D_mu0, D_var0 = model(inputs, inputs_D)
+                x_, mu_c, var_c, mu_t, var_t, mu_0, var_0 = model(inputs, inputs_D)
 
-                kl_m_c, kl_m_ct, kl_initial, likelihood, likelihood_r, likelihood_g, total = loss(x, x_, D, D_, \
-                    mu_c, var_c, mu_t, var_t, mu_0, var_0, D_mu0, D_var0, kl_factor, loss_type, obs_len, r1, r2, r3, g)
+                kl_m_c, kl_m_ct, kl_initial, likelihood, likelihood_r, likelihood_g, total = loss(x, x_, \
+                    mu_c, var_c, mu_t, var_t, mu_0, var_0, kl_factor, loss_type, obs_len, r1, r2, r3, g)
             else:
                 x_, mu_0, var_0, mu_c, var_c = model(inputs)
                 kl_m_c, kl_initial, likelihood, total = loss(x, x_, mu_0, var_0, mu_c, var_c, kl_factor, loss_type, r1, r2)
