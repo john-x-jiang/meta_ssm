@@ -71,7 +71,6 @@ class BaseDynamics(BaseModel):
             self.transition = Transition_LSTM(**trans_args)
         elif trans_model == 'ODE':
             self.transition = Transition_ODE(**trans_args)
-        import ipdb; ipdb.set_trace()
         self.emission = EmissionDecoder(input_dim, ems_filters, 1, latent_dim)
     
     def latent_initialization(self, x):
@@ -116,119 +115,6 @@ class BaseDynamics(BaseModel):
 
 
 class MetaDynamics(BaseModel):
-    def __init__(self,
-                 input_dim,
-                 latent_dim,
-                 obs_filters,
-                 obs_dim,
-                 init_filters,
-                 init_dim,
-                 ems_filters,
-                 trans_model,
-                 trans_args):
-        super().__init__()
-        self.input_dim = input_dim
-        self.latent_dim = latent_dim
-        self.obs_filters = obs_filters
-        self.obs_dim = obs_dim
-        self.init_filters = init_filters
-        self.init_dim = init_dim
-        self.ems_filters = ems_filters
-        self.trans_model = trans_model
-        self.trans_args = trans_args
-
-        # domain
-        self.domain_function = LatentStateEncoder(obs_dim, obs_filters, 1, latent_dim, stochastic=False)
-        self.gaussian = Gaussian(latent_dim, latent_dim)
-
-        # initialization
-        self.initial_function = LatentStateEncoder(init_dim, init_filters, 1, latent_dim)
-
-        # generative model
-        if trans_model == 'recurrent':
-            self.transition = Transition_Recurrent(**trans_args)
-        elif trans_model == 'RGN':
-            self.transition = Transition_RGN(**trans_args)
-        elif trans_model == 'RGN_residual':
-            self.transition = Transition_RGN_res(**trans_args)
-        elif trans_model == 'LSTM':
-            self.transition = Transition_LSTM(**trans_args)
-        elif trans_model == 'ODE':
-            self.transition = Transition_ODE(**trans_args)
-        self.emission = EmissionDecoder(input_dim, ems_filters, 1, latent_dim)
-    
-    def latent_initialization(self, x):
-        batch_size = x.shape[0]
-        x = x.view(batch_size, self.init_dim, self.input_dim, self.input_dim)
-        z_0, mu_0, var_0 = self.initial_function(x)
-        return z_0, mu_0, var_0
-
-    def latent_domain(self, D, K):
-        batch_size = D.shape[0]
-        D_z_c = []
-        for k in range(K):
-            x_i = D[:, k, :]
-            z_c_i = self.domain_function(x_i)
-            D_z_c.append(z_c_i)
-        
-        z_c = sum(D_z_c) / len(D_z_c)
-        mu, var, z = self.gaussian(z_c)
-        return z, mu, var
-
-    def latent_dynamics(self, T, z_0, z_c):
-        batch_size = z_0.shape[0]
-        if self.trans_model in ['recurrent', 'RGN', 'RGN_residual']:
-            z_ = torch.zeros([batch_size, T, self.latent_dim]).to(device)
-            z_prev = z_0
-            # z_[:, 0, :] = z_prev
-
-            for t in range(T):
-                zt = self.transition(z_prev, z_c)
-                z_prev = zt
-                z_[:, t, :] = zt
-        elif self.trans_model in ['ODE', 'LSTM']:
-            z_ = self.transition(T, z_0, z_c)
-        return z_
-
-    def forward(self, x, D):
-        T = x.size(1)
-        batch_size = x.size(0)
-
-        # domain condition
-        K = D.shape[1]
-        z_c, mu_c, var_c = self.latent_domain(D[:, :, :self.obs_dim, :], K)
-        
-        # initial condition
-        z_0, mu_0, var_0 = self.latent_initialization(x[:, :self.init_dim, :])
-        z_ = self.latent_dynamics(T, z_0, z_c)
-        z_ = z_.view(batch_size * T, -1)
-        x_ = self.emission(z_, batch_size, T)
-
-        # Regularization on context and target sets
-        x = x.view(batch_size, 1, T, self.input_dim, self.input_dim)
-        D_cat = torch.cat([D, x], dim=1)
-        _, mu_t, var_t = self.latent_domain(D_cat[:, :, :self.obs_dim, :], K + 1)
-
-        return x_, mu_c, var_c, mu_t, var_t, mu_0, var_0
-
-    def prediction(self, x, D):
-        T = x.size(1)
-        batch_size = x.size(0)
-
-        # domain condition
-        K = D.shape[1]
-        z_c, mu_c, var_c = self.latent_domain(D[:, :, :self.obs_dim, :], K)
-        
-        # initial condition
-        z_0, mu_0, var_0 = self.latent_initialization(x[:, :self.init_dim, :])
-        z_ = self.latent_dynamics(T, z_0, z_c)
-        z_ = z_.view(batch_size * T, -1)
-        x_ = self.emission(z_, batch_size, T)
-
-        return x_
-
-
-class MetaDynamics_1(BaseModel):
     def __init__(self,
                  input_dim,
                  latent_dim,
