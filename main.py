@@ -13,6 +13,8 @@ import model.metric as model_metric
 from trainer import training, evaluating
 from utils import Params
 
+import webdataset as wds
+
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
@@ -26,7 +28,7 @@ def parse_args():
     """
     parser = argparse.ArgumentParser()
 
-    parser.add_argument('--config', type=str, default='b01', help='config filename')
+    parser.add_argument('--config', type=str, default='demo03', help='config filename')
     parser.add_argument('--seed', type=int, default=123, help='random seed')
     parser.add_argument('--logging', type=bool, default=True, help='logging')
     parser.add_argument('--stage', type=int, default=1, help='1.Training, 2. Testing')
@@ -45,7 +47,6 @@ def data_loading(hparams, stage=1, data_tag='test'):
     num_workers = data_config['num_workers']
     data_name = data_config['data_name']
     k_shot = data_config['k_shot']
-
     if stage == 1:
         batch_size = hparams.batch_size
         split_train = 'train'
@@ -85,6 +86,58 @@ def data_loading(hparams, stage=1, data_tag='test'):
             k_shot=k_shot
         )
         return test_loader
+
+
+def hamiltonian_loaders(hparams, stage=1, data_tag='test'):
+    data_config = hparams.data
+    data_dir = data_config['data_dir']
+    num_workers = data_config['num_workers']
+
+    shards = "{0000..0999}.tar"
+
+    # Training dataloader
+    dataset_size = 20000
+    shuffle = 1000
+
+    train_dataset = (
+        wds.WebDataset(os.path.join(data_dir + "/train_tars/", shards), shardshuffle=True)
+        .shuffle(shuffle)
+        .decode("rgb")
+        .to_tuple("npz")
+        .batched(hparams.batch_size, partial=False)
+    )
+
+    # Initialize webloader
+    train_loader = wds.WebLoader(
+        train_dataset,
+        batch_size=None,
+        shuffle=False,
+        num_workers=num_workers
+    )
+
+    train_loader.length = dataset_size // hparams.batch_size
+    train_loader.unbatched().shuffle(1000).batched(hparams.batch_size)
+
+    # Testing dataloader
+    dataset_size = 4000
+
+    test_dataset = (
+        wds.WebDataset(os.path.join(data_dir + "/test_tars/", shards), shardshuffle=False)
+        .decode("rgb")
+        .to_tuple("npz")
+        .batched(hparams.batch_size, partial=False)
+    )
+
+    # Initialize webloader
+    test_loader = wds.WebLoader(
+        test_dataset,
+        batch_size=None,
+        shuffle=False,
+        num_workers=num_workers
+    )
+
+    test_loader.length = dataset_size // hparams.batch_size
+    return train_loader, test_loader
 
 
 def get_network_paramcount(model):
@@ -129,6 +182,44 @@ def train(hparams, checkpt, train_loader, valid_loader, exp_dir):
     # train model
     training.train_driver(model, checkpt, epoch_start, optimizer, lr_scheduler, \
         train_loader, valid_loader, loss, metrics, hparams, exp_dir)
+
+
+def train_hamiltonian(hparams, checkpt, train_loader, valid_loader, exp_dir):
+    # models
+    model_info = dict(hparams.model)
+    model = getattr(model_arch, model_info['type'])(**model_info['args'])
+    model.to(device)
+    epoch_start = 1
+    if checkpt is not None:
+        model.load_state_dict(checkpt['state_dict'])
+        learning_rate = checkpt['cur_learning_rate']
+        epoch_start = checkpt['epoch'] + 1
+
+    # loss & metrics
+    loss = getattr(model_loss, hparams.loss)
+    metrics = [getattr(model_metric, met) for met in hparams.metrics]
+
+    # optimizer
+    trainable_params = filter(lambda p: p.requires_grad, model.parameters())
+    optimizer_info = dict(hparams.optimizer)
+    optimizer = getattr(optim, optimizer_info['type'])(trainable_params, **optimizer_info['args'])
+    if checkpt is not None:
+        optimizer.load_state_dict(checkpt['optimizer'])
+
+    # lr scheduler
+    if not hparams.lr_scheduler or hparams.lr_scheduler == 0:
+        lr_scheduler = None
+    else:
+        lr_scheduler_info = dict(hparams.lr_scheduler)
+        lr_scheduler = getattr(optim.lr_scheduler, lr_scheduler_info['type'])(optimizer, **lr_scheduler_info['args'])
+
+    # count number of parameters in the mdoe
+    num_params = get_network_paramcount(model)
+    print('Number of parameters: {}'.format(num_params))
+
+    # train model
+    training.train_driver(model, checkpt, epoch_start, optimizer, lr_scheduler, \
+                          train_loader, valid_loader, loss, metrics, hparams, exp_dir)
 
 
 def evaluate(hparams, test_loader, exp_dir, data_tag):
@@ -189,6 +280,16 @@ def main(hparams, checkpt, stage=1, eval_tag='test', pred_tag='pred'):
 
         # start testing
         predict(hparams, eval_loader, pred_loader, exp_dir, pred_tag)
+
+    # Pendulum set
+    elif stage == 4:
+        # load data
+        train_loader, valid_loader = hamiltonian_loaders(hparams)
+
+        # start training on hamiltonian data
+        train_hamiltonian(hparams, checkpt, train_loader, valid_loader, exp_dir)
+
+
 
 
 if __name__ == '__main__':

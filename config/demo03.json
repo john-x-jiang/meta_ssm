@@ -22,9 +22,9 @@
     },
 
     "data":{
-        "data_set": "BouncingBallDataLoader",
-        "data_dir": "data/bouncing_ball",
-        "data_name": "mixed_gravity_2",
+        "data_set": "test",
+        "data_dir": "data/combined/combined_20000/",
+        "data_name": "combined",
         "num_workers": 1,
         "k_shot": 4
     },
