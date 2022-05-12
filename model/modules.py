@@ -289,7 +289,7 @@ class Transition_RGN(nn.Module):
 
     def forward(self, z_t_1, z_c=None):
         """ Given a latent state z, output z+1 """
-        if domain:
+        if self.domain:
             z = torch.cat((z_t_1, z_c), dim=1)
         else:
             z = z_t_1
@@ -327,7 +327,7 @@ class Transition_RGN_res(nn.Module):
 
     def forward(self, z_t_1, z_c=None):
         """ Given a latent state z, output z+1 """
-        if domain:
+        if self.domain:
             z_init = torch.cat((z_t_1, z_c), dim=1)
             z_combine = self.combine(z_init)
         else:
