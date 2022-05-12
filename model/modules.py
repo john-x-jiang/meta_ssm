@@ -215,6 +215,7 @@ class Transition_Recurrent(nn.Module):
             # compute the proposed mean
             self.lin3 = nn.Linear(z_dim, transition_dim)
             self.lin4 = nn.Linear(transition_dim, z_dim)
+            self.lin0 = nn.Linear(z_dim, z_dim)
         
         # compute the linearity part
         self.lin_n = nn.Linear(z_dim, z_dim)
@@ -252,7 +253,8 @@ class Transition_Recurrent(nn.Module):
             _h_t = self.act(self.lin3(z_t_1))
             h_t = self.act(self.lin4(_h_t))
             mu = (1 - g_t) * self.lin_n(z_t_1) + g_t * h_t
-            mu = mu + z_t_1
+            _mu = self.lin0(z_t_1)
+            mu = mu + _mu
         
         if self.stochastic:
             _var = self.lin_v(h_t)
