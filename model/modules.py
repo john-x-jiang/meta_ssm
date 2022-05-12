@@ -264,15 +264,19 @@ class Transition_Recurrent(nn.Module):
 
 
 class Transition_RGN(nn.Module):
-    def __init__(self, latent_dim, transition_dim, num_layers):
+    def __init__(self, latent_dim, transition_dim, num_layers, domain=False):
         """ Latent dynamics function where the state is given and the next state is output """
         super().__init__()
         self.latent_dim = latent_dim
         self.transition_dim = transition_dim
         self.num_layers = num_layers
+        self.domain = domain
 
         # Array that holds dimensions over hidden layers
-        self.layers_dim = [latent_dim * 2] + num_layers * [transition_dim] + [latent_dim]
+        if domain:
+            self.layers_dim = [latent_dim * 2] + num_layers * [transition_dim] + [latent_dim]
+        else:
+            self.layers_dim = [latent_dim] + num_layers * [transition_dim] + [latent_dim]
 
         # Build network layers
         self.acts = []
@@ -280,27 +284,36 @@ class Transition_RGN(nn.Module):
         self.layer_norms = []
         for i, (n_in, n_out) in enumerate(zip(self.layers_dim[:-1], self.layers_dim[1:])):
             self.acts.append(get_act('leaky_relu') if i < num_layers else get_act('linear'))
-            self.layers.append(nn.Linear(n_in, n_out))
-            self.layer_norms.append(nn.LayerNorm(n_out) if True and i < num_layers else nn.Identity())
+            self.layers.append(nn.Linear(n_in, n_out, device=device))
+            self.layer_norms.append(nn.LayerNorm(n_out, device=device) if True and i < num_layers else nn.Identity())
 
-    def forward(self, z_t_1, z_c):
+    def forward(self, z_t_1, z_c=None):
         """ Given a latent state z, output z+1 """
-        z = torch.cat((z_t_1, z_c), dim=1)
+        if domain:
+            z = torch.cat((z_t_1, z_c), dim=1)
+        else:
+            z = z_t_1
         for norm, a, layer in zip(self.layer_norms, self.acts, self.layers):
             z = a(norm(layer(z)))
         return z
 
 
 class Transition_RGN_res(nn.Module):
-    def __init__(self, latent_dim, transition_dim, num_layers):
+    def __init__(self, latent_dim, transition_dim, num_layers, domain=False):
         """ Latent dynamics function where the state is given and the next state is output """
         super().__init__()
         self.latent_dim = latent_dim
         self.transition_dim = transition_dim
         self.num_layers = num_layers
+        self.domain = domain
 
         # Array that holds dimensions over hidden layers
-        self.layers_dim = [latent_dim * 2] + num_layers * [transition_dim] + [latent_dim]
+        if domain:
+            self.layers_dim = [latent_dim * 2] + num_layers * [transition_dim] + [latent_dim]
+            # Combine
+            self.combine = nn.Linear(latent_dim * 2, latent_dim)
+        else:
+            self.layers_dim = [latent_dim] + num_layers * [transition_dim] + [latent_dim]
 
         # Build network layers
         self.acts = []
@@ -308,15 +321,18 @@ class Transition_RGN_res(nn.Module):
         self.layer_norms = []
         for i, (n_in, n_out) in enumerate(zip(self.layers_dim[:-1], self.layers_dim[1:])):
             self.acts.append(get_act('leaky_relu') if i < num_layers else get_act('linear'))
-            self.layers.append(nn.Linear(n_in, n_out))
-            self.layer_norms.append(nn.LayerNorm(n_out) if True and i < args.num_layers else nn.Identity())
+            self.layers.append(nn.Linear(n_in, n_out, device=device))
+            self.layer_norms.append(nn.LayerNorm(n_out, device=device) if True and i < args.num_layers else nn.Identity())
         
-        # Combine
-        self.combine = nn.Linear(latent_dim * 2, latent_dim)
 
-    def forward(self, z_t_1, z_c):
+    def forward(self, z_t_1, z_c=None):
         """ Given a latent state z, output z+1 """
-        z_init = torch.cat((z_t_1, z_c), dim=1)
+        if domain:
+            z_init = torch.cat((z_t_1, z_c), dim=1)
+            z_combine = self.combine(z_init)
+        else:
+            z_init = z_t_1
+            z_combine = z_init
         for lidx, (norm, a, layer) in enumerate(zip(self.layer_norms, self.acts, self.layers)):
             if lidx == 0:
                 z = a(norm(layer(z_init)))
@@ -324,26 +340,37 @@ class Transition_RGN_res(nn.Module):
                 z = a(norm(layer(z)))
 
         # Perform residual block
-        z_combine = self.combine(z_init)
         z = z + z_combine
         return z
 
 
 class Transition_LSTM(nn.Module):
-    def __init__(self, latent_dim, transition_dim):
+    def __init__(self, latent_dim, transition_dim, domain=False):
+        super().__init__()
+        self.latent_dim = latent_dim
+        self.transition_dim = transition_dim
+        self.domain = domain
+
+        if domain:
+            # Combine
+            self.combine = nn.Linear(latent_dim * 2, latent_dim)
+
         # Recurrent dynamics function
         self.dynamics_func = nn.LSTMCell(input_size=latent_dim, hidden_size=transition_dim)
         self.dynamics_out = nn.Linear(transition_dim, latent_dim)
 
-        # Combine
-        self.combine = nn.Linear(latent_dim * 2, latent_dim)
+        
     
-    def forward(self, T, z_0, z_c):
+    def forward(self, T, z_0, z_c=None):
         # Evaluate model forward over T to get L latent reconstructions
+        # TODO
         t = torch.linspace(1, T, T).to(device)
 
-        z = torch.cat((z_0, z_c), dim=1)
-        z_init = self.combine(z)
+        if self.domain:
+            z = torch.cat((z_0, z_c), dim=1)
+            z_init = self.combine(z)
+        else:
+            z_init = z_0
 
         # Evaluate forward over timesteps by recurrently passing in output states
         zt = []
@@ -391,7 +418,7 @@ class Transition_ODE(nn.Module):
             x = a(norm(layer(x)))
         return x
     
-    def forward(self, T, z_0, z_c):
+    def forward(self, T, z_0, z_c=None):
         B = z_0.shape[0]
         t = torch.linspace(0, T - 1, T).to(device)
         solver = lambda t, x: self.ode_solver(t, x)

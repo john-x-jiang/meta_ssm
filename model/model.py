@@ -91,9 +91,9 @@ class BaseDynamics(BaseModel):
         if self.trans_model in ['recurrent', 'RGN', 'RGN_residual']:
             z_ = torch.zeros([batch_size, T, self.latent_dim]).to(device)
             z_prev = z_0
-            # z_[:, 0, :] = z_prev
+            z_[:, 0, :] = z_prev
 
-            for t in range(T):
+            for t in range(1, T):
                 zt = self.transition(z_prev, z_c)
                 z_prev = zt
                 z_[:, t, :] = zt

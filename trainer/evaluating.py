@@ -38,7 +38,6 @@ def evaluate_epoch(model, data_loader, metrics, exp_dir, hparams, eval_config, d
                 x = x[:, :total_len]
 
             B, T = x.shape[0], x.shape[1]
-            K = D.shape[1]
             x = x.to(device)
             
             if domain:
@@ -108,6 +107,7 @@ def prediction_epoch(model, eval_data_loader, pred_data_loader, metrics, exp_dir
     model.eval()
     total_len = eval_config.get('total_len')
     domain = eval_config.get('domain')
+    batch_size = eval_config.get('batch_size')
     n_steps = 0
     bces, mses, vpts = None, None, None
 
@@ -137,6 +137,8 @@ def prediction_epoch(model, eval_data_loader, pred_data_loader, metrics, exp_dir
                 if total_len is not None:
                     D = D[:, :, :total_len]
                 D = D.to(device)
+                if x.shape[0] < batch_size:
+                    D = D[:x.shape[0], :]
                 x_ = model.prediction(x, D)
             else:
                 x_, mu_0, var_0, mu_c, var_c = model(D)
