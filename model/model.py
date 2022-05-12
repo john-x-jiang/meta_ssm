@@ -40,6 +40,7 @@ class BaseDynamics(BaseModel):
                  init_filters,
                  init_dim,
                  ems_filters,
+                 domain,
                  trans_model,
                  trans_args):
         super().__init__()
@@ -50,6 +51,7 @@ class BaseDynamics(BaseModel):
         self.init_filters = init_filters
         self.init_dim = init_dim
         self.ems_filters = ems_filters
+        self.domain = domain
         self.trans_model = trans_model
         self.trans_args = trans_args
 
@@ -86,7 +88,7 @@ class BaseDynamics(BaseModel):
         mu, var, z = self.gaussian(z_c)
         return z, mu, var
 
-    def latent_dynamics(self, T, z_0, z_c):
+    def latent_dynamics(self, T, z_0, z_c=None):
         batch_size = z_0.shape[0]
         if self.trans_model in ['recurrent', 'RGN', 'RGN_residual']:
             z_ = torch.zeros([batch_size, T, self.latent_dim]).to(device)
@@ -105,7 +107,10 @@ class BaseDynamics(BaseModel):
         T = x.size(1)
         batch_size = x.size(0)
 
-        z_c, mu_c, var_c = self.latent_domain(x[:, :self.obs_dim, :])
+        if self.domain:
+            z_c, mu_c, var_c = self.latent_domain(x[:, :self.obs_dim, :])
+        else:
+            z_c, mu_c, var_c = None, None, None
         z_0, mu_0, var_0 = self.latent_initialization(x[:, :self.init_dim, :])
         z_ = self.latent_dynamics(T, z_0, z_c)
         z_ = z_.view(batch_size * T, -1)

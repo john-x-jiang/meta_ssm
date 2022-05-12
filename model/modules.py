@@ -322,8 +322,7 @@ class Transition_RGN_res(nn.Module):
         for i, (n_in, n_out) in enumerate(zip(self.layers_dim[:-1], self.layers_dim[1:])):
             self.acts.append(get_act('leaky_relu') if i < num_layers else get_act('linear'))
             self.layers.append(nn.Linear(n_in, n_out, device=device))
-            self.layer_norms.append(nn.LayerNorm(n_out, device=device) if True and i < args.num_layers else nn.Identity())
-        
+            self.layer_norms.append(nn.LayerNorm(n_out, device=device) if True and i < num_layers else nn.Identity())
 
     def forward(self, z_t_1, z_c=None):
         """ Given a latent state z, output z+1 """
@@ -391,13 +390,19 @@ class Transition_LSTM(nn.Module):
 
 
 class Transition_ODE(nn.Module):
-    def __init__(self, latent_dim, ode_layer=2, stochastic=True):
+    def __init__(self, latent_dim, transition_dim, ode_layer=2, domain=False, stochastic=True):
         super().__init__()
         self.latent_dim = latent_dim
-        self.ode_layer = 3
+        self.transition_dim = transition_dim
+        self.ode_layer = ode_layer
+        self.domain = domain
         self.stochastic = stochastic
 
-        self.layers_dim = [latent_dim] + ode_layer * [latent_dim * 2] + [latent_dim]
+        if domain:
+            self.combine = nn.Linear(2 * latent_dim, 2 * latent_dim)
+            self.layers_dim = [2 * latent_dim] + ode_layer * [transition_dim] + [latent_dim]
+        else:
+            self.layers_dim = [latent_dim] + ode_layer * [transition_dim] + [latent_dim]
         self.layers = []
         self.acts = []
         self.layer_norms = []
@@ -405,8 +410,6 @@ class Transition_ODE(nn.Module):
             self.acts.append(get_act('leaky_relu') if i < ode_layer else get_act('linear'))
             self.layers.append(nn.Linear(n_in, n_out, device=device))
             self.layer_norms.append(nn.LayerNorm(n_out, device=device) if True and i < ode_layer else nn.Identity())
-
-        self.combine = nn.Linear(2 * latent_dim, latent_dim)
         
         self.lin_m = nn.Linear(latent_dim, latent_dim)
         if stochastic:
@@ -423,8 +426,11 @@ class Transition_ODE(nn.Module):
         t = torch.linspace(0, T - 1, T).to(device)
         solver = lambda t, x: self.ode_solver(t, x)
 
-        z_in = torch.cat([z_0, z_c], dim=1)
-        z_in = self.combine(z_in)
+        if self.domain:
+            z_in = torch.cat([z_0, z_c], dim=1)
+            z_in = self.combine(z_in)
+        else:
+            z_in = z_0
 
         zt = odeint(solver, z_in, t, method='rk4', rtol=1e-5, atol=1e-7, options={'step_size': 0.5})
         zt = zt.permute(1, 0, 2).contiguous()

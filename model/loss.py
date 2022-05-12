@@ -86,8 +86,11 @@ def dmm_loss(x, x_, mu_0, var_0, mu_c, var_c, kl_factor, loss_type='mse', r1=1, 
     kl_initial = kl_raw_0.sum() / B
 
     # domain condition
-    kl_raw_c = kl_div_stn(mu_c, var_c)
-    kl_m_c = kl_raw_c.sum() / B
+    if mu_c is not None:
+        kl_raw_c = kl_div_stn(mu_c, var_c)
+        kl_m_c = kl_raw_c.sum() / B
+    else:
+        kl_m_c = torch.zeros_like(kl_initial)
 
     loss = (r1 * kl_initial + r2 * kl_m_c) * kl_factor + likelihood
 
