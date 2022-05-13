@@ -1,4 +1,5 @@
 import time
+import scipy.stats as stats
 import torch
 import torch.nn.functional as F
 from torch.distributions import Normal
@@ -24,16 +25,37 @@ def top_k_acc(output, target, k=3):
     return correct / len(target)
 
 
+def cc(output, target):
+    B, T, N = target.shape
+    res = []
+    for i in range(B):
+        correlation_sum = 0
+        for j in range(N):
+            a = output[i, :, j]
+            b = target[i, :, j]
+            if (a == a[0]).all() or (b == b[0]).all():
+                correlation_sum = correlation_sum + 0
+            else:
+                correlation_sum = correlation_sum + stats.pearsonr(a, b)[0]
+        correlation_sum = correlation_sum / n
+        res.append(correlation_sum)
+    res = np.array(res)
+    return res
+
+
 def vpt(output, target):
-    epsilon = 0.025
+    epsilon = 0.02
     B, T = target.shape[0], target.shape[1]
     W, H = target.shape[2], target.shape[3]
     mse = F.mse_loss(output, target, reduction='none')
     mse_m = mse.sum(axis=[2, 3]) / (W * H)
     vpt = torch.zeros(B).to(mse.device)
-    # import ipdb; ipdb.set_trace()
     for i in range(B):
-        vpt[i] = torch.min(torch.where(mse_m[i, :] < epsilon)[0])
+        idx = torch.where(mse_m[i, :] >= epsilon)[0]
+        if idx.shape[0] > 0:
+            vpt[i] = torch.min(idx)
+        else:
+            vpt[i] = 0
     vpt = vpt / T
     return vpt
 

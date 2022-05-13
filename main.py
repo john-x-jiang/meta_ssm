@@ -31,14 +31,13 @@ def parse_args():
     parser.add_argument('--logging', type=bool, default=True, help='logging')
     parser.add_argument('--stage', type=int, default=1, help='1.Training, 2. Testing')
     parser.add_argument('--checkpt', type=str, default='None', help='checkpoint to resume training from')
-    parser.add_argument('--eval', type=str, default='test', help='dataset')
-    parser.add_argument('--pred', type=str, default='pred', help='dataset')
+    parser.add_argument('--tag', type=str, default='test', help='dataset')
 
     args = parser.parse_args()
     return args
 
 
-def data_loading(hparams, stage=1, data_tag='test'):
+def data_loading(hparams, stage=1):
     data_config = hparams.data
     data_set = data_config['data_set']
     data_dir = data_config['data_dir']
@@ -72,19 +71,51 @@ def data_loading(hparams, stage=1, data_tag='test'):
             k_shot=k_shot
         )
         return train_loader, valid_loader
-    else:
+    elif stage == 2:
+        eval_tags = data_config['eval_tags']
         batch_size = hparams.batch_size
         shuffle_test = False
-        test_loader = getattr(data_loaders, data_set)(
-            batch_size=batch_size,
-            data_dir=data_dir,
-            split=data_tag,
-            shuffle=shuffle_test,
-            num_workers=num_workers,
-            data_name=data_name,
-            k_shot=k_shot
-        )
-        return test_loader
+        test_loaders = {}
+        for eval_tag in eval_tags:
+            test_loader = getattr(data_loaders, data_set)(
+                batch_size=batch_size,
+                data_dir=data_dir,
+                split=eval_tag,
+                shuffle=shuffle_test,
+                num_workers=num_workers,
+                data_name=data_name,
+                k_shot=k_shot
+            )
+            test_loaders[eval_tag] = test_loader
+        return test_loaders
+    elif stage == 3:
+        eval_tags = data_config['eval_tags']
+        pred_tags = data_config['pred_tags']
+        batch_size = hparams.batch_size
+        shuffle_test = False
+        eval_loaders, pred_loaders = {}, {}
+        for eval_tag, pred_tag in zip(eval_tags, pred_tags):
+            eval_loader = getattr(data_loaders, data_set)(
+                batch_size=batch_size,
+                data_dir=data_dir,
+                split=eval_tag,
+                shuffle=shuffle_test,
+                num_workers=num_workers,
+                data_name=data_name,
+                k_shot=k_shot
+            )
+            pred_loader = getattr(data_loaders, data_set)(
+                batch_size=batch_size,
+                data_dir=data_dir,
+                split=pred_tag,
+                shuffle=shuffle_test,
+                num_workers=num_workers,
+                data_name=data_name,
+                k_shot=k_shot
+            )
+            eval_loaders[eval_tag] = eval_loader
+            pred_loaders[pred_tag] = pred_loader
+        return eval_loaders, pred_loaders
 
 
 def get_network_paramcount(model):
@@ -161,7 +192,7 @@ def predict(hparams, eval_loader, pred_loader, exp_dir, data_tag):
     evaluating.prediction_driver(model, eval_loader, pred_loader, metrics, hparams, exp_dir, data_tag)
 
 
-def main(hparams, checkpt, stage=1, eval_tag='test', pred_tag='pred'):
+def main(hparams, checkpt, stage=1, data_tags='test'):
     # directory path to save the model/results
     exp_dir = osp.join(osp.dirname(osp.realpath('__file__')),
                          'experiments', hparams.exp_name, hparams.exp_id)
@@ -178,17 +209,16 @@ def main(hparams, checkpt, stage=1, eval_tag='test', pred_tag='pred'):
         train(hparams, checkpt, train_loader, valid_loader, exp_dir)
     elif stage == 2:
         # load data
-        data_loader = data_loading(hparams, stage, eval_tag)
+        eval_loaders = data_loading(hparams, stage)
 
         # start testing
-        evaluate(hparams, data_loader, exp_dir, eval_tag)
+        evaluate(hparams, eval_loaders, exp_dir, data_tags)
     elif stage == 3:
         # load data
-        eval_loader = data_loading(hparams, stage, eval_tag)
-        pred_loader = data_loading(hparams, stage, pred_tag)
+        eval_loaders, pred_loaders = data_loading(hparams, stage)
 
         # start testing
-        predict(hparams, eval_loader, pred_loader, exp_dir, pred_tag)
+        predict(hparams, eval_loaders, pred_loaders, exp_dir, data_tags)
 
 
 if __name__ == '__main__':
@@ -222,6 +252,8 @@ if __name__ == '__main__':
     else:
         checkpt = None
     
+    tags = args.tag.split(',')
+
     if args.stage == 1:
         print('Stage 1: begin training ...')
         main(hparams, checkpt, stage=args.stage)
@@ -229,12 +261,12 @@ if __name__ == '__main__':
         print('--------------------------------------')
     elif args.stage == 2:
         print('Stage 2: begin evaluating ...')
-        main(hparams, checkpt, stage=args.stage, eval_tag=args.eval)
+        main(hparams, checkpt, stage=args.stage, data_tags=tags)
         print('Evaluating completed!')
         print('--------------------------------------')
     elif args.stage == 3:
         print('Stage 3: begin meta evaluating ...')
-        main(hparams, checkpt, stage=args.stage, eval_tag=args.eval, pred_tag=args.pred)
+        main(hparams, checkpt, stage=args.stage, data_tags=tags)
         print('Evaluating completed!')
         print('--------------------------------------')
     else:
