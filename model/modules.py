@@ -483,7 +483,9 @@ class Transition_ODE(nn.Module):
 
         if domain:
             self.combine = nn.Linear(2 * latent_dim, latent_dim)
-        self.layers_dim = [2 * latent_dim] + ode_layer * [transition_dim] + [2 * latent_dim]
+            self.layers_dim = [2 * latent_dim] + ode_layer * [transition_dim] + [2 * latent_dim]
+        else:
+            self.layers_dim = [latent_dim] + ode_layer * [transition_dim] + [latent_dim]
         self.layers = []
         self.acts = []
         self.layer_norms = []
