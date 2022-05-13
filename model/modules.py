@@ -117,6 +117,88 @@ class LatentStateEncoder(nn.Module):
             return z
 
 
+class SpatialTemporalBlock(nn.Module):
+    def __init__(self, t_in, t_out, n_in, n_out, num_channels, last):
+        super().__init__()
+        self.t_in = t_in
+        self.t_out = t_out
+        self.n_in = n_in
+        self.n_out = n_out
+        self.num_channels = num_channels
+        self.last = last
+
+        self.conv = nn.Conv2d(n_in, n_out, kernel_size=5, stride=2, padding=(2, 2))
+        self.bn = nn.BatchNorm2d(n_out)
+        self.act = nn.LeakyReLU(0.1)
+        self.lin_t = nn.Linear(t_in, t_out)
+
+        if last:
+            self.act_last = nn.Tanh()
+
+    def forward(self, x):
+        B, _, _, H_in, W_in = x.shape
+        x = x.contiguous()
+        x = x.view(B * self.t_in, self.n_in, H_in, W_in)
+        x = self.act(self.bn(self.conv(x)))
+        H_out, W_out = x.shape[2], x.shape[3]
+        x = x.view(B, self.t_in, self.n_out, H_out, W_out)
+        
+        x = x.permute(0, 2, 3, 4, 1).contiguous()
+        x = self.lin_t(x)
+        x = x.permute(0, 4, 1, 2, 3).contiguous()
+
+        if self.last:
+            x = self.act_last(x)
+            x = x.view(B, -1, H_out, W_out)
+        else:
+            x = self.act(x)
+        return x
+
+
+class LatentDomainEncoder(nn.Module):
+    def __init__(self, time_steps, num_filters, num_channels, latent_dim, stochastic=True):
+        """
+        Holds the convolutional encoder that takes in a sequence of images and outputs the
+        domain of the latent dynamics
+        :param time_steps: how many GT steps are used in domain
+        :param num_filters: base convolutional filters, upscaled by 2 every layer
+        :param num_channels: how many image color channels there are
+        :param latent_dim: dimension of the latent dynamics
+        """
+        super().__init__()
+        self.time_steps = time_steps
+        self.num_channels = num_channels
+        self.stochastic = stochastic
+
+        # Encoder, q(z_0 | x_{0:time_steps})
+        self.encoder = nn.Sequential(
+            SpatialTemporalBlock(time_steps, time_steps // 2, 1, num_filters, num_channels, False),
+            SpatialTemporalBlock(time_steps // 2, time_steps // 4, num_filters, num_filters * 2, num_channels, False),
+            SpatialTemporalBlock(time_steps // 4, 1, num_filters * 2, num_filters, num_channels, True),
+            Flatten()
+        )
+        if stochastic:
+            self.output = Gaussian(num_filters * 4 ** 2, latent_dim)
+        else:
+            self.output = nn.Linear(num_filters * 4 ** 2, latent_dim)
+
+    def forward(self, x):
+        """
+        Handles getting the initial state given x and saving the distributional parameters
+        :param x: input sequences [BatchSize, GenerationLen * NumChannels, H, W]
+        :return: z0 over the batch [BatchSize, LatentDim]
+        """
+        B, _, H, W = x.shape
+        x = x.view(B, self.time_steps, self.num_channels, H, W)
+        z = self.encoder(x)
+        if self.stochastic:
+            mu, var, z = self.output(z)
+            return mu, var, z
+        else:
+            z = self.output(z)
+            return z
+
+
 class EmissionDecoder(nn.Module):
     def __init__(self, dim, num_filters, num_channels, latent_dim):
         """

@@ -142,7 +142,7 @@ class MetaDynamics(BaseModel):
         self.trans_args = trans_args
 
         # domain
-        self.domain_function = LatentStateEncoder(obs_dim, obs_filters, 1, latent_dim, stochastic=False)
+        self.domain_function = LatentDomainEncoder(obs_dim, obs_filters, 1, latent_dim, stochastic=False)
         self.gaussian = Gaussian(latent_dim, latent_dim)
 
         # initialization

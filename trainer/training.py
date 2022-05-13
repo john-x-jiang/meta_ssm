@@ -186,6 +186,7 @@ def train_epoch(model, epoch, loss, optimizer, data_loader, hparams):
         r1 = train_config.get('r1')
         r2 = train_config.get('r2')
         r3 = train_config.get('r3')
+        l = train_config.get('l')
         
         if domain:
             if total_len is not None:
@@ -194,10 +195,10 @@ def train_epoch(model, epoch, loss, optimizer, data_loader, hparams):
             x_, mu_c, var_c, mu_t, var_t, mu_0, var_0 = model(x, D)
 
             kl_m_c, kl_m_ct, kl_initial, likelihood, total = loss(x, x_, \
-                mu_c, var_c, mu_t, var_t, mu_0, var_0, kl_factor, loss_type, obs_len, r1, r2, r3)
+                mu_c, var_c, mu_t, var_t, mu_0, var_0, kl_factor, loss_type, obs_len, r1, r2, r3, l)
         else:
             x_, mu_0, var_0, mu_c, var_c = model(x)
-            kl_m_c, kl_initial, likelihood, total = loss(x, x_, mu_0, var_0, mu_c, var_c, kl_factor, loss_type, r1, r2)
+            kl_m_c, kl_initial, likelihood, total = loss(x, x_, mu_0, var_0, mu_c, var_c, kl_factor, loss_type, r1, r2, l)
         total.backward()
 
         kl_initial_loss += kl_initial.item()
@@ -250,6 +251,7 @@ def valid_epoch(model, epoch, loss, data_loader, hparams):
             r1 = train_config.get('r1')
             r2 = train_config.get('r2')
             r3 = train_config.get('r3')
+            l = train_config.get('l')
             
             if domain:
                 if total_len is not None:
@@ -258,10 +260,10 @@ def valid_epoch(model, epoch, loss, data_loader, hparams):
                 x_, mu_c, var_c, mu_t, var_t, mu_0, var_0 = model(x, D)
 
                 kl_m_c, kl_m_ct, kl_initial, likelihood, total = loss(x, x_, \
-                    mu_c, var_c, mu_t, var_t, mu_0, var_0, kl_factor, loss_type, obs_len, r1, r2, r3)
+                    mu_c, var_c, mu_t, var_t, mu_0, var_0, kl_factor, loss_type, obs_len, r1, r2, r3, l)
             else:
                 x_, mu_0, var_0, mu_c, var_c = model(x)
-                kl_m_c, kl_initial, likelihood, total = loss(x, x_, mu_0, var_0, mu_c, var_c, kl_factor, loss_type, r1, r2)
+                kl_m_c, kl_initial, likelihood, total = loss(x, x_, mu_0, var_0, mu_c, var_c, kl_factor, loss_type, r1, r2, l)
             
             kl_initial_loss += kl_initial.item()
             likelihood_loss += likelihood.item()
