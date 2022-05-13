@@ -474,19 +474,16 @@ class Transition_LSTM(nn.Module):
 
 
 class Transition_ODE(nn.Module):
-    def __init__(self, latent_dim, transition_dim, ode_layer=2, domain=False, stochastic=True):
+    def __init__(self, latent_dim, transition_dim, ode_layer=2, domain=False):
         super().__init__()
         self.latent_dim = latent_dim
         self.transition_dim = transition_dim
         self.ode_layer = ode_layer
         self.domain = domain
-        self.stochastic = stochastic
 
         if domain:
-            self.combine = nn.Linear(2 * latent_dim, 2 * latent_dim)
-            self.layers_dim = [2 * latent_dim] + ode_layer * [transition_dim] + [latent_dim]
-        else:
-            self.layers_dim = [latent_dim] + ode_layer * [transition_dim] + [latent_dim]
+            self.combine = nn.Linear(2 * latent_dim, latent_dim)
+        self.layers_dim = [2 * latent_dim] + ode_layer * [transition_dim] + [2 * latent_dim]
         self.layers = []
         self.acts = []
         self.layer_norms = []
@@ -494,11 +491,6 @@ class Transition_ODE(nn.Module):
             self.acts.append(get_act('leaky_relu') if i < ode_layer else get_act('linear'))
             self.layers.append(nn.Linear(n_in, n_out, device=device))
             self.layer_norms.append(nn.LayerNorm(n_out, device=device) if True and i < ode_layer else nn.Identity())
-        
-        self.lin_m = nn.Linear(latent_dim, latent_dim)
-        if stochastic:
-            self.lin_v = nn.Linear(latent_dim, latent_dim)
-            self.act_v = nn.Tanh()
     
     def ode_solver(self, t, x):
         for norm, a, layer in zip(self.layer_norms, self.acts, self.layers):
@@ -512,21 +504,15 @@ class Transition_ODE(nn.Module):
 
         if self.domain:
             z_in = torch.cat([z_0, z_c], dim=1)
-            z_in = self.combine(z_in)
         else:
             z_in = z_0
 
         zt = odeint(solver, z_in, t, method='rk4', rtol=1e-5, atol=1e-7, options={'step_size': 0.5})
         zt = zt.permute(1, 0, 2).contiguous()
+        if self.domain:
+            zt = self.combine(zt)
         
-        mu = self.lin_m(zt)
-        if self.stochastic:
-            _var = self.lin_v(zt)
-            _var = torch.clamp(_var, min=-100, max=85)
-            var = self.act_v(_var)
-            return mu, var
-        else:
-            return mu
+        return zt
 
 
 def get_act(act="relu"):
