@@ -158,6 +158,7 @@ def train_epoch(model, epoch, loss, optimizer, data_loader, hparams):
     total_len = train_config.get('total_len')
     loss_type = train_config.get('loss_type')
     domain = train_config.get('domain')
+    changeable = train_config.get('changeable')
     obs_len = train_config.get('obs_len')
     kl_m_c_loss, kl_m_ct_loss, kl_initial_loss = 0, 0, 0
     likelihood_loss, total_loss = 0, 0
@@ -191,6 +192,10 @@ def train_epoch(model, epoch, loss, optimizer, data_loader, hparams):
         if domain:
             if total_len is not None:
                 D = D[:, :, :total_len]
+            K = D.shape[1]
+            if changeable:
+                sub_K = np.random.randint(low=1, high=K+1, size=1)[0]
+                D = D[:, :sub_K, :]
             D = D.to(device)
             x_, mu_c, var_c, mu_t, var_t, mu_0, var_0 = model(x, D)
 
@@ -228,6 +233,7 @@ def valid_epoch(model, epoch, loss, data_loader, hparams):
     total_len = train_config.get('total_len')
     loss_type = train_config.get('loss_type')
     domain = train_config.get('domain')
+    changeable = train_config.get('changeable')
     obs_len = train_config.get('obs_len')
     kl_m_c_loss, kl_m_ct_loss, kl_initial_loss = 0, 0, 0
     likelihood_loss, total_loss = 0, 0
@@ -256,6 +262,9 @@ def valid_epoch(model, epoch, loss, data_loader, hparams):
             if domain:
                 if total_len is not None:
                     D = D[:, :, :total_len]
+                if changeable:
+                    sub_K = np.random.randint(low=1, high=K+1, size=1)[0]
+                    D = D[:, :sub_K, :]
                 D = D.to(device)
                 x_, mu_c, var_c, mu_t, var_t, mu_0, var_0 = model(x, D)
 

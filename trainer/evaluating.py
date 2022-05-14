@@ -132,6 +132,7 @@ def prediction_epoch(model, eval_data_loaders, pred_data_loaders, metrics, exp_d
     model.eval()
     total_len = eval_config.get('total_len')
     domain = eval_config.get('domain')
+    changeable = eval_config.get('changeable')
     batch_size = eval_config.get('batch_size')
     n_steps = 0
     data_idx = 0
@@ -168,6 +169,9 @@ def prediction_epoch(model, eval_data_loaders, pred_data_loaders, metrics, exp_d
                 if domain:
                     if total_len is not None:
                         D = D[:, :, :total_len]
+                    if changeable:
+                        sub_K = np.random.randint(low=1, high=K+1, size=1)[0]
+                        D = D[:, :sub_K, :]
                     D = D.to(device)
                     if x.shape[0] < batch_size:
                         D = D[:x.shape[0], :]
