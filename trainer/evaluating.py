@@ -169,6 +169,7 @@ def prediction_epoch(model, eval_data_loaders, pred_data_loaders, metrics, exp_d
                 if domain:
                     if total_len is not None:
                         D = D[:, :, :total_len]
+                    K = D.shape[1]
                     if changeable:
                         sub_K = np.random.randint(low=1, high=K+1, size=1)[0]
                         D = D[:, :sub_K, :]
