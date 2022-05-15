@@ -38,6 +38,9 @@ def evaluate_epoch(model, data_loaders, metrics, exp_dir, hparams, eval_config, 
             bces_data, mses_data, vpts_data = None, None, None
             for idx, batch in enumerate(data_loader):
                 x, D, x_state, D_state, label = batch
+                # if len(x.shape) < 4:
+                #     T, H, W = x.shape
+                #     x = x.view(1, T, H, W)
                 if total_len is not None:
                     x = x[:, :total_len]
 
@@ -61,12 +64,12 @@ def evaluate_epoch(model, data_loaders, metrics, exp_dir, hparams, eval_config, 
                     grdths = tensor2np(x)
                     labels = tensor2np(label)                    
                 else:
+                    if len(x_.shape) < 4:
+                        H, W = x.shape[2], x.shape[3]
+                        x_ = x_.view(1, T, H, W)
                     recons = np.concatenate((recons, tensor2np(x_)), axis=0)
                     grdths = np.concatenate((grdths, tensor2np(x)), axis=0)
                     labels = np.concatenate((labels, tensor2np(label)), axis=0)
-                
-                if data_name in data_tags:
-                    save_result(exp_dir, recons, grdths, labels, data_name)
                 
                 for met in metrics:
                     if met.__name__ == 'bce':
@@ -93,6 +96,9 @@ def evaluate_epoch(model, data_loaders, metrics, exp_dir, hparams, eval_config, 
                             vpts_data = vpt
                         else:
                             vpts_data = np.concatenate((vpts_data, vpt), axis=0)
+            
+            if data_name in data_tags:
+                save_result(exp_dir, recons, grdths, labels, data_name)
             for met in metrics:
                 if met.__name__ == 'bce':
                     # reconstruction
@@ -193,9 +199,6 @@ def prediction_epoch(model, eval_data_loaders, pred_data_loaders, metrics, exp_d
                     grdths = np.concatenate((grdths, tensor2np(x)), axis=0)
                     labels = np.concatenate((labels, tensor2np(label)), axis=0)
                 
-                if pred_data_name in data_tags:
-                    save_result(exp_dir, recons, grdths, labels, pred_data_name)
-                
                 for met in metrics:
                     if met.__name__ == 'bce':
                         # reconstruction
@@ -221,6 +224,8 @@ def prediction_epoch(model, eval_data_loaders, pred_data_loaders, metrics, exp_d
                             vpts_data = vpt
                         else:
                             vpts_data = np.concatenate((vpts_data, vpt), axis=0)
+            if pred_data_name in data_tags:
+                save_result(exp_dir, recons, grdths, labels, pred_data_name)
             for met in metrics:
                 if met.__name__ == 'bce':
                     # reconstruction
