@@ -55,7 +55,7 @@ def vpt(output, target):
         if idx.shape[0] > 0:
             vpt[i] = torch.min(idx)
         else:
-            vpt[i] = 0
+            vpt[i] = T
     vpt = vpt / T
     return vpt
 
