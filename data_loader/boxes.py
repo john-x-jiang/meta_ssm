@@ -30,7 +30,7 @@ class PymunkData(Dataset):
         if 'state' in npzfile:
             # Only load the position, not velocity
             self.state = npzfile['state'].astype(np.float32)[:, :, :2]
-            self.velocity = npzfile['state'].astype(np.float32)[:, :, 2:]
+            # self.velocity = npzfile['state'].astype(np.float32)[:, :, 2:]
 
             # Normalize the mean
             # self.state = self.state - self.state.mean(axis=(0, 1))
@@ -87,7 +87,7 @@ class PymunkSetData(Dataset):
         if 'state' in npzfile:
             # Only load the position, not velocity
             self.state = npzfile['state'].astype(np.float32)[:, :, :2]
-            self.velocity = npzfile['state'].astype(np.float32)[:, :, 2:]
+            # self.velocity = npzfile['state'].astype(np.float32)[:, :, 2:]
 
             # Normalize the mean
             # self.state = self.state - self.state.mean(axis=(0, 1))
@@ -168,7 +168,7 @@ class PymunkEpisoticData(Dataset):
         if 'state' in npzfile:
             # Only load the position, not velocity
             self.state = npzfile['state'].astype(np.float32)[:, :, :2]
-            self.velocity = npzfile['state'].astype(np.float32)[:, :, 2:]
+            # self.velocity = npzfile['state'].astype(np.float32)[:, :, 2:]
 
             # Normalize the mean
             # self.state = self.state - self.state.mean(axis=(0, 1))

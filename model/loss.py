@@ -95,3 +95,19 @@ def dmm_loss(x, x_, mu_0, var_0, mu_c, var_c, kl_factor, loss_type='mse', r1=1, 
     loss = (r1 * kl_initial + r2 * kl_m_c) * kl_factor + likelihood
 
     return kl_m_c, kl_initial, likelihood, loss
+
+
+def dkf_loss(x, x_, mu_qs, var_qs, mu_ps, var_ps, kl_factor, loss_type='mse', r1=1, r2=1, l=1):
+    # likelihood
+    B, T = x.shape[0], x.shape[1]
+    nll_raw = nll_loss(x_, x, loss_type)
+    likelihood = nll_raw.sum() / B
+
+    kl_raw = kl_div(mu_qs, var_qs, mu_ps, var_ps)
+    kl_m = kl_raw.sum() / B
+
+    kl_m_c = torch.zeros_like(kl_m)
+
+    loss = (r1 * kl_m + r2 * kl_m_c) * kl_factor + likelihood
+
+    return kl_m_c, kl_m, likelihood, loss

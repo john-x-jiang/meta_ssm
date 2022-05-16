@@ -440,9 +440,7 @@ class Transition_LSTM(nn.Module):
 
         # Recurrent dynamics function
         self.dynamics_func = nn.LSTMCell(input_size=latent_dim, hidden_size=transition_dim)
-        self.dynamics_out = nn.Linear(transition_dim, latent_dim)
-
-        
+        self.dynamics_out = nn.Linear(transition_dim, latent_dim)  
     
     def forward(self, T, z_0, z_c=None):
         # Evaluate model forward over T to get L latent reconstructions
