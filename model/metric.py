@@ -4,6 +4,8 @@ import torch
 import torch.nn.functional as F
 from torch.distributions import Normal
 from model.loss import nll_loss, kl_div
+from skimage.filters import threshold_otsu
+import numpy as np
 
 
 def accuracy(output, target):
@@ -68,3 +70,60 @@ def bce(output, target):
 def mse(output, target):
     mse = F.mse_loss(output, target, reduction='none')
     return mse
+
+
+def dst(output, target):
+    N, T = target.shape[0], target.shape[1]
+    output, target = thresholding(output, target)
+    results = np.zeros([N, T])
+    for n in range(N):
+        for t in range(T):
+            a = output[n, t]
+            b = target[n, t]
+            pos_a = np.where(a == 1)
+            pos_b = np.where(b == 1)
+
+            if pos_b[0].shape[0] == 0:
+                results[n, t] = 0
+                continue
+            center_b = [pos_b[0].mean(), pos_b[1].mean()]
+            if pos_a[0].shape[0] != 0:
+                center_a = [pos_a[0].mean(), pos_a[1].mean()]
+            else:
+                center_a = [0, 0]
+            center_a = np.array(center_a)
+            center_b = np.array(center_b)
+            dist = np.sum((center_a - center_b)**2)
+            dist = np.sqrt(dist)
+            results[n, t] = dist
+    return results
+
+
+def vpd(output, target):
+    epsilon = 10
+    mses = dst(output, target)
+    B, T = mses.shape
+    vpt = np.zeros(B)
+    for i in range(B):
+        idx = np.where(mses[i, :] >= epsilon)[0]
+        if idx.shape[0] > 0:
+            vpt[i] = np.min(idx)
+        else:
+            vpt[i] = T
+    vpt = vpt / T
+    return vpt
+
+
+def thresholding(output, target):
+    target[:, :, 0, :] = 0
+    target[:, :, :, 0] = 0
+    output[:, :, 0, :] = 0
+    output[:, :, :, 0] = 0
+    N, T = target.shape[0], target.shape[1]
+    res = np.zeros_like(output)
+    for n in range(N):
+        for t in range(T):
+            img = output[n, t]
+            otsu_th = np.max([0.27, threshold_otsu(img)])
+            res[n, t] = (img > otsu_th).astype(np.float32)
+    return res, target

@@ -26,6 +26,7 @@ def evaluate_epoch(model, data_loaders, metrics, exp_dir, hparams, eval_config, 
     domain = eval_config.get('domain')
     n_steps = 0
     bces, mses, vpts = None, None, None
+    dsts, vpds = None, None
 
     recons = None
     grdths = None
@@ -36,6 +37,7 @@ def evaluate_epoch(model, data_loaders, metrics, exp_dir, hparams, eval_config, 
         for data_idx, data_name in enumerate(data_names):
             data_loader = data_loaders[data_name]
             bces_data, mses_data, vpts_data = None, None, None
+            dsts_data, vpds_data = None, None
             for idx, batch in enumerate(data_loader):
                 x, D, x_state, D_state, label = batch
                 # if len(x.shape) < 4:
@@ -96,6 +98,28 @@ def evaluate_epoch(model, data_loaders, metrics, exp_dir, hparams, eval_config, 
                             vpts_data = vpt
                         else:
                             vpts_data = np.concatenate((vpts_data, vpt), axis=0)
+                    if met.__name__ == 'dst':
+                        # reconstruction
+                        if isinstance(x, torch.Tensor):
+                            x = tensor2np(x)
+                        if isinstance(x_, torch.Tensor):
+                            x_ = tensor2np(x_)
+                        dst = met(x_, x)
+                        if idx == 0:
+                            dsts_data = dst
+                        else:
+                            dsts_data = np.concatenate((dsts_data, dst), axis=0)
+                    if met.__name__ == 'vpd':
+                        # reconstruction
+                        if isinstance(x, torch.Tensor):
+                            x = tensor2np(x)
+                        if isinstance(x_, torch.Tensor):
+                            x_ = tensor2np(x_)
+                        vpd = met(x_, x)
+                        if idx == 0:
+                            vpds_data = vpd
+                        else:
+                            vpds_data = np.concatenate((vpds_data, vpd), axis=0)
             
             if data_name in data_tags:
                 save_result(exp_dir, recons, grdths, labels, data_name)
@@ -118,6 +142,18 @@ def evaluate_epoch(model, data_loaders, metrics, exp_dir, hparams, eval_config, 
                         vpts = vpts_data
                     else:
                         vpts = np.concatenate((vpts, vpts_data), axis=0)
+                if met.__name__ == 'dst':
+                    # reconstruction
+                    if data_idx == 0:
+                        dsts = dsts_data
+                    else:
+                        dsts = np.concatenate((dsts, dsts_data), axis=0)
+                if met.__name__ == 'vpd':
+                    # reconstruction
+                    if data_idx == 0:
+                        vpds = vpds_data
+                    else:
+                        vpds = np.concatenate((vpds, vpds_data), axis=0)
 
     for met in metrics:
         if met.__name__ == 'bce':
@@ -126,6 +162,10 @@ def evaluate_epoch(model, data_loaders, metrics, exp_dir, hparams, eval_config, 
             print_results(exp_dir, 'mse', mses)
         if met.__name__ == 'vpt':
             print_results(exp_dir, 'vpt', vpts)
+        if met.__name__ == 'dst':
+            print_results(exp_dir, 'dst', dsts)
+        if met.__name__ == 'vpd':
+            print_results(exp_dir, 'vpd', vpds)
 
 
 def prediction_driver(model, eval_data_loaders, pred_data_loaders, metrics, hparams, exp_dir, data_tags):
@@ -143,6 +183,7 @@ def prediction_epoch(model, eval_data_loaders, pred_data_loaders, metrics, exp_d
     n_steps = 0
     data_idx = 0
     bces, mses, vpts = None, None, None
+    dsts, vpds = None, None
 
     recons = None
     grdths = None
@@ -155,6 +196,7 @@ def prediction_epoch(model, eval_data_loaders, pred_data_loaders, metrics, exp_d
             pred_data_loader = pred_data_loaders[pred_data_name]
             eval_data_loader = eval_data_loaders[eval_data_name]
             bces_data, mses_data, vpts_data = None, None, None
+            dsts_data, vpds_data = None, None
             data_iterator = iter(eval_data_loader)
             for idx, batch in enumerate(pred_data_loader):
                 x, _, x_state, _, label = batch
@@ -224,6 +266,29 @@ def prediction_epoch(model, eval_data_loaders, pred_data_loaders, metrics, exp_d
                             vpts_data = vpt
                         else:
                             vpts_data = np.concatenate((vpts_data, vpt), axis=0)
+                    if met.__name__ == 'dst':
+                        # reconstruction
+                        if isinstance(x, torch.Tensor):
+                            x = tensor2np(x)
+                        if isinstance(x_, torch.Tensor):
+                            x_ = tensor2np(x_)
+                        dst = met(x_, x)
+                        if idx == 0:
+                            dsts_data = dst
+                        else:
+                            dsts_data = np.concatenate((dsts_data, dst), axis=0)
+                    if met.__name__ == 'vpd':
+                        # reconstruction
+                        if isinstance(x, torch.Tensor):
+                            x = tensor2np(x)
+                        if isinstance(x_, torch.Tensor):
+                            x_ = tensor2np(x_)
+                        vpd = met(x_, x)
+                        if idx == 0:
+                            vpds_data = vpd
+                        else:
+                            vpds_data = np.concatenate((vpds_data, vpd), axis=0)
+
             if pred_data_name in data_tags:
                 save_result(exp_dir, recons, grdths, labels, pred_data_name)
             for met in metrics:
@@ -245,6 +310,18 @@ def prediction_epoch(model, eval_data_loaders, pred_data_loaders, metrics, exp_d
                         vpts = vpts_data
                     else:
                         vpts = np.concatenate((vpts, vpts_data), axis=0)
+                if met.__name__ == 'dst':
+                    # reconstruction
+                    if data_idx == 0:
+                        dsts = dsts_data
+                    else:
+                        dsts = np.concatenate((dsts, dsts_data), axis=0)
+                if met.__name__ == 'vpd':
+                    # reconstruction
+                    if data_idx == 0:
+                        vpds = vpds_data
+                    else:
+                        vpds = np.concatenate((vpds, vpds_data), axis=0)
             data_idx += 1
 
     for met in metrics:
@@ -254,15 +331,21 @@ def prediction_epoch(model, eval_data_loaders, pred_data_loaders, metrics, exp_d
             print_results(exp_dir, 'mse', mses)
         if met.__name__ == 'vpt':
             print_results(exp_dir, 'vpt', vpts)
+        if met.__name__ == 'dst':
+            print_results(exp_dir, 'dst', dsts)
+        if met.__name__ == 'vpd':
+            print_results(exp_dir, 'vpd', vpds)
 
 
 def print_results(exp_dir, met_name, mets):
     if not os.path.exists(exp_dir + '/data'):
         os.makedirs(exp_dir + '/data')
     
-    print('{} for seq = {:05.5f}'.format(met_name, mets.mean()))
+    print('{} for seq avg = {:05.5f}'.format(met_name, mets.mean()))
+    print('{} for seq std = {:05.5f}'.format(met_name, mets.std()))
     with open(os.path.join(exp_dir, 'data/metric.txt'), 'a+') as f:
-        f.write('{} for seq = {}\n'.format(met_name, mets.mean()))
+        f.write('{} for seq avg = {}\n'.format(met_name, mets.mean()))
+        f.write('{} for seq std = {}\n'.format(met_name, mets.std()))
 
 
 def save_result(exp_dir, recons, inputs, labels, data_tag):
