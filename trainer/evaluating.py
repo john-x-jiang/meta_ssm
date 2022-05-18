@@ -77,6 +77,7 @@ def evaluate_epoch(model, data_loaders, metrics, exp_dir, hparams, eval_config, 
                     if met.__name__ == 'bce':
                         # reconstruction
                         bce = met(x_, x)
+                        bce = bce.mean([1, 2, 3])
                         bce = tensor2np(bce)
                         if idx == 0:
                             bces_data = bce
@@ -85,6 +86,7 @@ def evaluate_epoch(model, data_loaders, metrics, exp_dir, hparams, eval_config, 
                     if met.__name__ == 'mse':
                         # reconstruction
                         mse = met(x_, x)
+                        mse = mse.mean([1, 2, 3])
                         mse = tensor2np(mse)
                         if idx == 0:
                             mses_data = mse
@@ -105,6 +107,7 @@ def evaluate_epoch(model, data_loaders, metrics, exp_dir, hparams, eval_config, 
                         if isinstance(x_, torch.Tensor):
                             x_ = tensor2np(x_)
                         dst = met(x_, x)
+                        dst = dst.mean(1)
                         if idx == 0:
                             dsts_data = dst
                         else:
@@ -245,6 +248,7 @@ def prediction_epoch(model, eval_data_loaders, pred_data_loaders, metrics, exp_d
                     if met.__name__ == 'bce':
                         # reconstruction
                         bce = met(x_, x)
+                        bce = bce.mean([1, 2, 3])
                         bce = tensor2np(bce)
                         if idx == 0:
                             bces_data = bce
@@ -253,6 +257,7 @@ def prediction_epoch(model, eval_data_loaders, pred_data_loaders, metrics, exp_d
                     if met.__name__ == 'mse':
                         # reconstruction
                         mse = met(x_, x)
+                        mse = mse.mean([1, 2, 3])
                         mse = tensor2np(mse)
                         if idx == 0:
                             mses_data = mse
@@ -273,6 +278,7 @@ def prediction_epoch(model, eval_data_loaders, pred_data_loaders, metrics, exp_d
                         if isinstance(x_, torch.Tensor):
                             x_ = tensor2np(x_)
                         dst = met(x_, x)
+                        dst = dst.mean(1)
                         if idx == 0:
                             dsts_data = dst
                         else:
