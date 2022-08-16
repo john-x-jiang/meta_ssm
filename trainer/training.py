@@ -15,7 +15,7 @@ from data_loader.seq_util import reverse_sequence, binary_mask
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
-def train_driver(model, checkpt, epoch_start, optimizer, lr_scheduler, \
+def train_driver(model, checkpt, epoch_start, optimizer, lr_scheduler, finetune, \
     train_loader, valid_loader, loss, metrics, hparams, exp_dir):
     kl_m_c_t, kl_m_ct_t, kl_initial_t, likelihood_t, train_loss = [], [], [], [], []
     kl_m_c_e, kl_m_ct_e, kl_initial_e, likelihood_e, val_loss = [], [], [], [], []
@@ -26,7 +26,7 @@ def train_driver(model, checkpt, epoch_start, optimizer, lr_scheduler, \
     metric_err = None
     not_improved_count = 0
 
-    if checkpt is not None:
+    if checkpt is not None and finetune == 0:
         train_loss, val_loss = checkpt['train_loss'], checkpt['val_loss']
 
         kl_m_c_t, kl_m_c_e = checkpt['kl_m_c_t'], checkpt['kl_m_c_e']

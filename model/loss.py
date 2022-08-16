@@ -58,11 +58,15 @@ def meta_loss(x, x_, mu_c, var_c, mu_t, var_t, mu_0, var_0, kl_factor, loss_type
     likelihood = nll_m
 
     # domain condition
-    kl_raw_c = kl_div_stn(mu_c, var_c)
-    kl_m_c = kl_raw_c.sum() / B
+    if mu_c is not None:
+        kl_raw_c = kl_div_stn(mu_c, var_c)
+        kl_m_c = kl_raw_c.sum() / B
 
-    kl_raw_c_t = kl_div(mu_c, var_c, mu_t, var_t)
-    kl_m_c_t = kl_raw_c_t.sum() / B
+        kl_raw_c_t = kl_div(mu_c, var_c, mu_t, var_t)
+        kl_m_c_t = kl_raw_c_t.sum() / B
+    else:
+        kl_m_c = torch.zeros_like(nll_m)
+        kl_m_c_t = torch.zeros_like(nll_m)
 
     # initial condition
     kl_raw_0 = kl_div_stn(mu_0, var_0)
@@ -78,6 +82,8 @@ def meta_loss(x, x_, mu_c, var_c, mu_t, var_t, mu_0, var_0, kl_factor, loss_type
 def dmm_loss(x, x_, mu_0, var_0, mu_c, var_c, kl_factor, loss_type='mse', r1=1, r2=1, l=1):
     # likelihood
     B, T = x.shape[0], x.shape[1]
+    if B == 1:
+        x_ = torch.reshape(x_, x.size())
     nll_raw = nll_loss(x_, x, loss_type)
     likelihood = l * nll_raw[:, 0, :].sum() / B + nll_raw[:, 1:, :].sum() / B / (T - 1)
 

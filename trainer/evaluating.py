@@ -40,9 +40,6 @@ def evaluate_epoch(model, data_loaders, metrics, exp_dir, hparams, eval_config, 
             dsts_data, vpds_data = None, None
             for idx, batch in enumerate(data_loader):
                 x, D, x_state, D_state, label = batch
-                # if len(x.shape) < 4:
-                #     T, H, W = x.shape
-                #     x = x.view(1, T, H, W)
                 if total_len is not None:
                     x = x[:, :total_len]
 
@@ -56,6 +53,9 @@ def evaluate_epoch(model, data_loaders, metrics, exp_dir, hparams, eval_config, 
                     x_ = model.prediction(x, D)
                 else:
                     x_, mu_0, var_0, mu_c, var_c = model(x)
+                
+                if B == 1:
+                    x_ = torch.reshape(x_, x.size())
                 n_steps += 1
                 
                 if torch.isnan(x_).any():
@@ -230,6 +230,9 @@ def prediction_epoch(model, eval_data_loaders, pred_data_loaders, metrics, exp_d
                     x_ = model.prediction(x, D)
                 else:
                     x_, mu_0, var_0, mu_c, var_c = model(D)
+                
+                if B == 1:
+                    x_ = torch.reshape(x_, x.size())
                 n_steps += 1
                 
                 if torch.isnan(x_).any():
