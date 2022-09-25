@@ -89,7 +89,7 @@ def data_loading(hparams, stage=1):
             )
             test_loaders[eval_tag] = test_loader
         return test_loaders
-    elif stage == 3:
+    elif stage == 3 or stage == 4:
         eval_tags = data_config['eval_tags']
         pred_tags = data_config['pred_tags']
         batch_size = hparams.batch_size
@@ -193,6 +193,21 @@ def predict(hparams, eval_loader, pred_loader, exp_dir, data_tag):
     evaluating.prediction_driver(model, eval_loader, pred_loader, metrics, hparams, exp_dir, data_tag)
 
 
+def embedding(hparams, eval_loader, pred_loader, exp_dir, data_tag):
+    # models
+    model_info = dict(hparams.model)
+    model = getattr(model_arch, model_info['type'])(**model_info['args'])
+    model.to(device)
+    checkpt = torch.load(exp_dir + '/' + hparams.best_model, map_location=device)
+    model.load_state_dict(checkpt['state_dict'])
+
+    # metrics
+    metrics = [getattr(model_metric, met) for met in hparams.metrics]
+
+    # evaluate model
+    evaluating.embedding_driver(model, eval_loader, pred_loader, metrics, hparams, exp_dir, data_tag)
+
+
 def main(hparams, checkpt, stage=1, data_tags='test'):
     # directory path to save the model/results
     exp_dir = osp.join(osp.dirname(osp.realpath('__file__')),
@@ -220,6 +235,12 @@ def main(hparams, checkpt, stage=1, data_tags='test'):
 
         # start testing
         predict(hparams, eval_loaders, pred_loaders, exp_dir, data_tags)
+    elif stage == 4:
+        # load data
+        eval_loaders, pred_loaders = data_loading(hparams, stage)
+
+        # start testing
+        embedding(hparams, eval_loaders, pred_loaders, exp_dir, data_tags)
 
 
 if __name__ == '__main__':
@@ -269,6 +290,11 @@ if __name__ == '__main__':
         print('Stage 3: begin meta evaluating ...')
         main(hparams, checkpt, stage=args.stage, data_tags=tags)
         print('Evaluating completed!')
+        print('--------------------------------------')
+    elif args.stage == 4:
+        print('Stage 4: begin embedding analysis ...')
+        main(hparams, checkpt, stage=args.stage, data_tags=tags)
+        print('Analysis completed!')
         print('--------------------------------------')
     else:
         print('Invalid stage option!')

@@ -112,6 +112,8 @@ def train_driver(model, checkpt, epoch_start, optimizer, lr_scheduler, finetune,
         # Check if current epoch is better than best so far
         if epoch == 1:
             metric_err = log[monitor_metric][-1]
+            if finetune != 0:
+                torch.save(log, exp_dir + '/m_best')
         else:
             improved = (monitor_mode == 'min' and log[monitor_metric][-1] <= metric_err) or \
                        (monitor_mode == 'max' and log[monitor_metric][-1] >= metric_err)

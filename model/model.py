@@ -175,7 +175,7 @@ class MetaDynamics(BaseModel):
             z_c_i = self.domain_function(x_i)
             D_z_c.append(z_c_i)
         
-        z_c = sum(D_z_c) / len(D_z_c)
+        z_c = sum(D_z_c) / len(D_z_c) # TODO save for embedding
         mu, var, z = self.gaussian(z_c)
         return z, mu, var
 
@@ -229,6 +229,29 @@ class MetaDynamics(BaseModel):
         z_ = z_.view(batch_size * T, -1)
         x_ = self.emission(z_, batch_size, T)
 
+        return x_
+    
+    def prediction_embedding(self, x, D):
+        T = x.size(1)
+        batch_size = x.size(0)
+
+        # domain condition
+        K = D.shape[1]
+        z_c, mu_c, var_c = self.latent_domain(D[:, :, :self.obs_dim, :], K)
+
+        return z_c, mu_c, var_c
+    
+    def prediction_sampling(self, x, z_0, z_center):
+        """
+        Function that handles predicting from the same initial state z0 when given differing z_c as a result
+        of a K-Means algorithm applied to the train set embeddings
+        """
+        T = x.size(1)
+        batch_size = x.size(0)
+
+        z_ = self.latent_dynamics(T, z_0, z_center)
+        z_ = z_.view(batch_size * T, -1)
+        x_ = self.emission(z_, batch_size, T)
         return x_
 
 
@@ -288,7 +311,7 @@ class DetMetaDynamics(BaseModel):
             z_c_i = self.domain_function(x_i)
             D_z_c.append(z_c_i)
         
-        z_c = sum(D_z_c) / len(D_z_c)
+        z_c = sum(D_z_c) / len(D_z_c) # TODO: plot out D_z_c in TSNE
         return z_c
 
     def latent_dynamics(self, T, z_0, z_c):
@@ -336,6 +359,25 @@ class DetMetaDynamics(BaseModel):
         z_ = z_.view(batch_size * T, -1)
         x_ = self.emission(z_, batch_size, T)
 
+        return x_
+    
+    def prediction_embedding(self, x, D):
+        T = x.size(1)
+        batch_size = x.size(0)
+
+        # domain condition
+        K = D.shape[1]
+        z_c = self.latent_domain(D[:, :, :self.obs_dim, :], K)
+
+        return z_c, torch.zeros_like(z_c), torch.zeros_like(z_c)
+
+    def prediction_sampling(self, x, z_0, z_center):
+        T = x.size(1)
+        batch_size = x.size(0)
+
+        z_ = self.latent_dynamics(T, z_0, z_center)
+        z_ = z_.view(batch_size * T, -1)
+        x_ = self.emission(z_, batch_size, T)
         return x_
 
 

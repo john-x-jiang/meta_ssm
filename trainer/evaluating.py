@@ -209,7 +209,7 @@ def prediction_epoch(model, eval_data_loaders, pred_data_loaders, metrics, exp_d
                 except StopIteration:
                     data_iterator = iter(eval_data_loader)
                     eval_batch = next(data_iterator)
-                _, D, _, D_state, label = eval_batch
+                _, D, _, D_state, D_label = eval_batch
 
                 if total_len is not None:
                     x = x[:, :total_len]
@@ -344,6 +344,117 @@ def prediction_epoch(model, eval_data_loaders, pred_data_loaders, metrics, exp_d
             print_results(exp_dir, 'dst', dsts)
         if met.__name__ == 'vpd':
             print_results(exp_dir, 'vpd', vpds)
+
+
+def embedding_driver(model, eval_data_loaders, pred_data_loaders, metrics, hparams, exp_dir, data_tags):
+    eval_config = hparams.evaluating
+    model.eval()
+    total_len = eval_config.get('total_len')
+    domain = eval_config.get('domain')
+    changeable = eval_config.get('changeable')
+    batch_size = eval_config.get('batch_size')
+    n_steps = 0
+    data_idx = 0
+
+    with torch.no_grad():
+        eval_data_names = list(eval_data_loaders.keys())
+        pred_data_names = list(pred_data_loaders.keys())
+        for eval_data_name, pred_data_name in zip(eval_data_names, pred_data_names):
+            pred_data_loader = pred_data_loaders[pred_data_name]
+            eval_data_loader = eval_data_loaders[eval_data_name]
+            data_iterator = iter(eval_data_loader)
+
+            c_mus, c_vars, c_zs, labels = [], [], [], []
+            recons, grdths = None, None
+            for idx, batch in enumerate(pred_data_loader):
+                x, _, x_state, _, label = batch
+
+                try:
+                    eval_batch = next(data_iterator)
+                except StopIteration:
+                    data_iterator = iter(eval_data_loader)
+                    eval_batch = next(data_iterator)
+                _, D, _, D_state, D_label = eval_batch
+
+                if total_len is not None:
+                    x = x[:, :total_len]
+
+                B, T = x.shape[0], x.shape[1]
+                x = x.to(device)
+                
+                if total_len is not None:
+                    D = D[:, :, :total_len]
+                K = D.shape[1]
+                if changeable:
+                    sub_K = np.random.randint(low=1, high=K+1, size=1)[0]
+                    D = D[:, :sub_K, :]
+                D = D.to(device)
+                if x.shape[0] < batch_size:
+                    D = D[:x.shape[0], :]
+                z_c, mu_c, logvar_c = model.prediction_embedding(x, D)
+                
+                if B == 1:
+                    C = z_c.shape
+                    z_c = torch.reshape(z_c, [1, C])
+                    mu_c = torch.reshape(mu_c, [1, C])
+                    logvar_c = torch.reshape(logvar_c, [1, C])
+                
+                n_steps += 1
+
+                kmeans_path = '{}/embeddings/kmeans_clusters.npz'.format(exp_dir)
+                if os.path.exists(kmeans_path):
+                    centroids = np.load(kmeans_path)
+                    centers = centroids['centers']
+                    clabels = centroids['labels']
+
+                    D_centers = torch.from_numpy(centers).to(device)
+                    D_centers = D_centers.unsqueeze(1).repeat(1, x.shape[0], 1)
+                    # predictions = x.unsqueeze(0)
+                    x_ = None
+
+                    # initial condition
+                    z_0, _, _ = model.latent_initialization(x[:, :model.init_dim, :])
+
+                    for cid, center in enumerate(D_centers):
+                        if torch.unique(label).shape[0] == 1 and clabels[cid] == torch.unique(label)[0]:
+                            x_ = model.prediction_sampling(x, z_0, center)
+                            # predictions = torch.vstack((predictions, x_.unsqueeze(0)))
+                        else:
+                            continue
+
+                    # np.save(f"{exp_dir}/embeddings/predictions_{pred_data_name}_initial_state_{idx}.npy",
+                    #         predictions.detach().cpu().numpy())
+
+                if idx == 0:
+                    c_mus = tensor2np(mu_c)
+                    c_vars = tensor2np(logvar_c)
+                    c_zs = tensor2np(z_c)
+                    labels = tensor2np(label)
+
+                    if x_ is not None:
+                        recons = tensor2np(x_)
+                        grdths = tensor2np(x)
+                else:
+                    c_mus = np.concatenate((c_mus, tensor2np(mu_c)), axis=0)
+                    c_vars = np.concatenate((c_vars, tensor2np(logvar_c)), axis=0)
+                    c_zs = np.concatenate((c_zs, tensor2np(z_c)), axis=0)
+                    labels = np.concatenate((labels, tensor2np(label)), axis=0)
+
+                    if x_ is not None:
+                        recons = np.concatenate((recons, tensor2np(x_)), axis=0)
+                        grdths = np.concatenate((grdths, tensor2np(x)), axis=0)
+
+            print(c_zs.shape)
+            if not os.path.exists(kmeans_path):
+                if not os.path.exists(exp_dir + '/embeddings'):
+                    os.makedirs(exp_dir + '/embeddings')
+                
+                np.savez(f"{exp_dir}/embeddings/embeddings_{pred_data_name}.npz",
+                        c_vars=c_vars, c_mus=c_mus, c_zs=c_zs, labels=labels)
+            else:
+                if recons is not None:
+                    sio.savemat(os.path.join(exp_dir, 'embeddings/{}.mat'.format(pred_data_name)), 
+                                {'recons': recons, 'inputs': grdths, 'label': labels})
 
 
 def print_results(exp_dir, met_name, mets):
