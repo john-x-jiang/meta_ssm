@@ -46,12 +46,13 @@ inputs = mat['inputs']
 recons = mat['recons']
 
 blank = 5
+dd = 1
 num_sample = args.sample
 time_steps = args.timestep
 obs = args.obs
 start = args.start
 
-pannel = np.ones((32 * 2 * num_sample + blank * (num_sample + 2), 32 * time_steps + 3 * blank)) * 255
+pannel = np.ones(((32 * 2 + dd) * num_sample + blank * (num_sample + 2), (32 + dd) * time_steps + 3 * blank)) * 255
 pannel = np.uint8(pannel)
 pannel = Image.fromarray(pannel)
 
@@ -65,19 +66,23 @@ for num, idx in enumerate(selected_idx):
     selected_inps = np.uint8(selected_inps * 255)
     selected_rcns = np.uint8(selected_rcns * 255)
 
-    img = np.zeros((32 * 2, obs * 32)).astype(np.uint8)
+    img = np.zeros((32 * 2 + dd, obs * (32 + dd))).astype(np.uint8)
     for i in range(obs):
-        img[:32, i * 32: (i + 1) * 32] = selected_inps[i]
-        img[32:64, i * 32: (i + 1) * 32] = selected_rcns[i]
+        img[:32, i * (32 + dd):(i + 1) * (32 + dd) - dd] = selected_inps[i]
+        img[32 + dd:64 + dd, i * (32 + dd):(i + 1) * (32 + dd) - dd] = selected_rcns[i]
+        img[:, (i + 1) * (32 + dd) - dd] = 255
+        img[32, :] = 255
     
     img = Image.fromarray(img)
     pannel.paste(img, (blank, blank * (num + 1) + num * 32 * 2))
     
     if time_steps > obs:
-        img_gen = np.zeros((32 * 2, (time_steps - obs) * 32)).astype(np.uint8)
+        img_gen = np.zeros((32 * 2, (time_steps - obs) * (32 + dd))).astype(np.uint8)
         for i in range(time_steps - obs):
-            img_gen[:32, i * 32: (i + 1) * 32] = selected_inps[i + obs]
-            img_gen[32:64, i * 32: (i + 1) * 32] = selected_rcns[i + obs]
+            img_gen[:32, i * (32 + dd):(i + 1) * (32 + dd) - dd] = selected_inps[i + obs]
+            img_gen[32:64, i * (32 + dd):(i + 1) * (32 + dd) - dd] = selected_rcns[i + obs]
+            img[:, (i + 1) * (32 + dd) - dd] = 255
+            img[32, :] = 255
 
         img_gen = Image.fromarray(img_gen)
         pannel.paste(img_gen, (blank * 2 + 32 * obs, blank * (num + 1) + num * 32 * 2))
