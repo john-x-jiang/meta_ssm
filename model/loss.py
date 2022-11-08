@@ -121,3 +121,25 @@ def dkf_loss(x, x_, mu_qs, var_qs, mu_ps, var_ps, kl_factor, loss_type='mse', r1
     loss = (r1 * kl_m + r2 * kl_m_c) * kl_factor + likelihood
 
     return kl_m_c, kl_m, likelihood, loss
+
+
+def meta_dkf_loss(x, x_, mu_qs, var_qs, mu_ps, var_ps, mu_c, var_c, kl_factor, loss_type='mse', obs_len=10, r1=1, r2=1, r3=1, l=1):
+    # likelihood
+    B, T = x.shape[0], x.shape[1]
+    if B == 1:
+        x_ = torch.reshape(x_, x.size())
+    nll_raw = nll_loss(x_, x, loss_type)
+    likelihood = nll_raw.sum() / B
+
+    kl_raw = kl_div(mu_qs, var_qs, mu_ps, var_ps)
+    kl_m = kl_raw.sum() / B
+
+    if mu_c is not None:
+        kl_raw_c = kl_div_stn(mu_c, var_c)
+        kl_m_c = kl_raw_c.sum() / B
+    else:
+        kl_m_c = torch.zeros_like(kl_m)
+
+    loss = (r1 * kl_m + r2 * kl_m_c) * kl_factor + likelihood
+
+    return kl_m_c, kl_m, torch.zeros_like(kl_m), likelihood, loss

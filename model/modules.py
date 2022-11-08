@@ -64,6 +64,45 @@ class Gaussian(nn.Module):
         # Reparameterize and sample
         z = self.reparameterization(mu, logvar)
         return mu, logvar, z
+    
+    def repara_debug(self, mu, logvar):
+        d = mu.shape[1]
+        zs = []
+        # for i in range(d):
+        #     std = torch.zeros_like(logvar)
+        #     std[:, i] = 2
+        #     z = mu - torch.exp(std)
+        #     zs.append(z)
+        # zs.append(mu + torch.ones_like(logvar))
+        # for i in range(d):
+        #     std = torch.zeros_like(logvar)
+        #     std[:, i] = 2
+        #     z = mu + torch.exp(std)
+        #     zs.append(z)
+        for i in range(20):
+            std = torch.zeros_like(logvar)
+            # std[:, 0] = -10 + i
+            std[:, 1] = -10 + i
+            # std[:, 1] = -10 + 2 * i
+            z = mu + std
+            zs.append(z)
+        zs = torch.cat(zs)
+        return zs
+    
+    def debug(self, x):
+        mu = self.mu(x)
+        logvar = self.var(x)
+
+        # Clamp the variance
+        if (mu < -100).any() or (mu > 85).any() or (logvar < -100).any() or (logvar > 85).any():
+            mu = torch.clamp(mu, min=-100, max=85)
+            logvar = torch.clamp(logvar, min=-100, max=85)
+            # print("Explosion in mu/logvar of component")
+        logvar = self.act_var(logvar)
+
+        # Reparameterize and sample
+        z = self.repara_debug(mu, logvar)
+        return mu, logvar, z
 
 
 """
@@ -190,6 +229,78 @@ class LatentDomainEncoder(nn.Module):
         """
         B, _, H, W = x.shape
         x = x.view(B, self.time_steps, self.num_channels, H, W)
+        z = self.encoder(x)
+        if self.stochastic:
+            mu, var, z = self.output(z)
+            return mu, var, z
+        else:
+            z = self.output(z)
+            return z
+
+
+class SpatialBlock(nn.Module):
+    def __init__(self, n_in, n_out, last):
+        super().__init__()
+        self.n_in = n_in
+        self.n_out = n_out
+        self.last = last
+
+        self.conv = nn.Conv2d(n_in, n_out, kernel_size=5, stride=2, padding=(2, 2))
+        self.bn = nn.BatchNorm2d(n_out)
+        self.act = nn.LeakyReLU(0.1)
+
+        if last:
+            self.act_last = nn.Tanh()
+
+    def forward(self, x):
+        B, T, _, H_in, W_in = x.shape
+        x = x.contiguous()
+        x = x.view(B * T, self.n_in, H_in, W_in)
+        x = self.act(self.bn(self.conv(x)))
+        H_out, W_out = x.shape[2], x.shape[3]
+        x = x.view(B, T, self.n_out, H_out, W_out)
+
+        if self.last:
+            x = self.act_last(x)
+            x = x.view(B, T, -1)
+        else:
+            x = self.act(x)
+        return x
+
+
+class LatentDomainEncoderDKF(nn.Module):
+    def __init__(self, num_filters, num_channels, latent_dim, stochastic=True):
+        """
+        Holds the convolutional encoder that takes in a sequence of images and outputs the
+        domain of the latent dynamics
+        :param time_steps: how many GT steps are used in domain
+        :param num_filters: base convolutional filters, upscaled by 2 every layer
+        :param num_channels: how many image color channels there are
+        :param latent_dim: dimension of the latent dynamics
+        """
+        super().__init__()
+        self.num_channels = num_channels
+        self.stochastic = stochastic
+
+        # Encoder, q(z_0 | x_{0:time_steps})
+        self.encoder = nn.Sequential(
+            SpatialBlock(num_channels, num_filters, False),
+            SpatialBlock(num_filters, num_filters * 2, False),
+            SpatialBlock(num_filters * 2, num_filters, True)
+        )
+        if stochastic:
+            self.output = Gaussian(num_filters * 4 ** 2, latent_dim)
+        else:
+            self.output = nn.Linear(num_filters * 4 ** 2, latent_dim)
+
+    def forward(self, x):
+        """
+        Handles getting the initial state given x and saving the distributional parameters
+        :param x: input sequences [BatchSize, GenerationLen * NumChannels, H, W]
+        :return: z0 over the batch [BatchSize, LatentDim]
+        """
+        B, T, H, W = x.shape
+        x = x.view(B, T, self.num_channels, H, W)
         z = self.encoder(x)
         if self.stochastic:
             mu, var, z = self.output(z)
@@ -743,13 +854,17 @@ class Correction(nn.Module):
     logvar: tensor (b, z_dim)
         Log-var that parameterizes the variational Gaussian distribution
     """
-    def __init__(self, z_dim, rnn_dim, stochastic=True):
+    def __init__(self, z_dim, rnn_dim, stochastic=True, domain=False):
         super().__init__()
         self.z_dim = z_dim
         self.rnn_dim = rnn_dim
         self.stochastic = stochastic
+        self.domain = domain
 
-        self.lin1 = nn.Linear(z_dim, rnn_dim)
+        if not self.domain:
+            self.lin1 = nn.Linear(z_dim, rnn_dim)
+        else:
+            self.lin1 = nn.Linear(2 * z_dim, rnn_dim)
         self.act = nn.Tanh()
 
         self.lin2 = nn.Linear(rnn_dim, z_dim)
@@ -761,13 +876,17 @@ class Correction(nn.Module):
     def init_z_q_0(self, trainable=True):
         return nn.Parameter(torch.zeros(self.z_dim), requires_grad=trainable)
 
-    def forward(self, h_rnn, z_t_1=None, rnn_bidirection=False):
+    def forward(self, h_rnn, z_t_1=None, rnn_bidirection=False, z_c=None):
         """
         z_t_1: tensor (b, z_dim)
         h_rnn: tensor (b, rnn_dim)
         """
         assert z_t_1 is not None
-        h_comb_ = self.act(self.lin1(z_t_1))
+        if not self.domain:
+            h_comb_ = self.act(self.lin1(z_t_1))
+        else:
+            z_combine = torch.cat((z_t_1, z_c), dim=1)
+            h_comb_ = self.act(self.lin1(z_combine))
         if rnn_bidirection:
             h_comb = (1.0 / 3) * (h_comb_ + h_rnn[:, :self.rnn_dim] + h_rnn[:, self.rnn_dim:])
         else:
@@ -781,6 +900,7 @@ class Correction(nn.Module):
             return mu, var
         else:
             return mu
+
 
 class GRU_unit(nn.Module):
     def __init__(self, input_dim, latent_dim, num_units=100):

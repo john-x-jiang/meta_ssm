@@ -365,9 +365,16 @@ def embedding_driver(model, eval_data_loaders, pred_data_loaders, metrics, hpara
             data_iterator = iter(eval_data_loader)
 
             c_mus, c_vars, c_zs, labels = [], [], [], []
+            xss = None
             recons, grdths = None, None
+            # np.random.seed(123)
+            # selected = np.random.choice(1000, 5, replace=False)
             for idx, batch in enumerate(pred_data_loader):
                 x, _, x_state, _, label = batch
+
+                # if idx not in selected:
+                if idx != 0:
+                    continue
 
                 try:
                     eval_batch = next(data_iterator)
@@ -389,41 +396,56 @@ def embedding_driver(model, eval_data_loaders, pred_data_loaders, metrics, hpara
                     sub_K = np.random.randint(low=1, high=K+1, size=1)[0]
                     D = D[:, :sub_K, :]
                 D = D.to(device)
+
                 if x.shape[0] < batch_size:
                     D = D[:x.shape[0], :]
                 z_c, mu_c, logvar_c = model.prediction_embedding(x, D)
+                # z_c, xs_ = model.prediction_debug(x, D)
                 
                 if B == 1:
                     C = z_c.shape
-                    z_c = torch.reshape(z_c, [1, C])
-                    mu_c = torch.reshape(mu_c, [1, C])
-                    logvar_c = torch.reshape(logvar_c, [1, C])
+                    # z_c = torch.reshape(z_c, [1, C])
+                    # mu_c = torch.reshape(mu_c, [1, C])
+                    # logvar_c = torch.reshape(logvar_c, [1, C])
                 
                 n_steps += 1
 
-                kmeans_path = '{}/embeddings/kmeans_clusters.npz'.format(exp_dir)
+                kmeans_path = '{}/embeddings/centers.npz'.format(exp_dir)
+                # if idx == 0 and os.path.exists(kmeans_path):
                 if os.path.exists(kmeans_path):
                     centroids = np.load(kmeans_path)
-                    centers = centroids['centers']
+                    centers = centroids['zs_avg']
+                    stds = centroids['zs_std']
                     clabels = centroids['labels']
 
-                    D_centers = torch.from_numpy(centers).to(device)
+                    D_centers = torch.from_numpy(centers).float().to(device)
                     D_centers = D_centers.unsqueeze(1).repeat(1, x.shape[0], 1)
+
+                    D_stds = torch.from_numpy(centers).float().to(device)
+                    D_stds = D_stds.unsqueeze(1).repeat(1, x.shape[0], 1)
                     # predictions = x.unsqueeze(0)
-                    x_ = None
+                    predictions = x
 
                     # initial condition
                     z_0, _, _ = model.latent_initialization(x[:, :model.init_dim, :])
 
+                    d = D_centers.shape[2]
                     for cid, center in enumerate(D_centers):
-                        if torch.unique(label).shape[0] == 1 and clabels[cid] == torch.unique(label)[0]:
-                            x_ = model.prediction_sampling(x, z_0, center)
-                            # predictions = torch.vstack((predictions, x_.unsqueeze(0)))
-                        else:
-                            continue
+                        for m in range(d):
+                            for n in range(3):
+                                std = torch.zeros_like(D_stds[cid])
+                                std[:, m] = 5 * (-1 + n) * D_stds[cid, :, m]
+                                cc = center + std
 
-                    # np.save(f"{exp_dir}/embeddings/predictions_{pred_data_name}_initial_state_{idx}.npy",
-                    #         predictions.detach().cpu().numpy())
+                                x_ = model.prediction_sampling(x, z_0, cc)
+                                # predictions = torch.vstack((predictions, x_.unsqueeze(0)))
+                                predictions = torch.cat((predictions, x_), axis=0)
+
+                    if not os.path.exists(exp_dir + '/embeddings/generation/'):
+                        os.makedirs(exp_dir + '/embeddings/generation/')
+                    if pred_data_name in data_tags:
+                        np.save(f"{exp_dir}/embeddings/generation/predictions_{pred_data_name}_initial_state_{idx}.npy",
+                                predictions.detach().cpu().numpy())
 
                 if idx == 0:
                     c_mus = tensor2np(mu_c)
@@ -431,18 +453,21 @@ def embedding_driver(model, eval_data_loaders, pred_data_loaders, metrics, hpara
                     c_zs = tensor2np(z_c)
                     labels = tensor2np(label)
 
-                    if x_ is not None:
-                        recons = tensor2np(x_)
-                        grdths = tensor2np(x)
                 else:
                     c_mus = np.concatenate((c_mus, tensor2np(mu_c)), axis=0)
                     c_vars = np.concatenate((c_vars, tensor2np(logvar_c)), axis=0)
                     c_zs = np.concatenate((c_zs, tensor2np(z_c)), axis=0)
                     labels = np.concatenate((labels, tensor2np(label)), axis=0)
 
-                    if x_ is not None:
-                        recons = np.concatenate((recons, tensor2np(x_)), axis=0)
-                        grdths = np.concatenate((grdths, tensor2np(x)), axis=0)
+                # c_zs = tensor2np(z_c)
+                # labels = tensor2np(label)
+                # xss = tensor2np(xs_)
+
+                # if not os.path.exists(exp_dir + '/embedding_debug'):
+                #     os.makedirs(exp_dir + '/embedding_debug')
+                # if pred_data_name in data_tags:
+                #     np.savez(f"{exp_dir}/embedding_debug/embeddings_{pred_data_name}_{idx}.npz",
+                #             xs=xss, c_zs=c_zs, labels=labels)
 
             print(c_zs.shape)
             if not os.path.exists(kmeans_path):
@@ -451,10 +476,6 @@ def embedding_driver(model, eval_data_loaders, pred_data_loaders, metrics, hpara
                 
                 np.savez(f"{exp_dir}/embeddings/embeddings_{pred_data_name}.npz",
                         c_vars=c_vars, c_mus=c_mus, c_zs=c_zs, labels=labels)
-            else:
-                if recons is not None:
-                    sio.savemat(os.path.join(exp_dir, 'embeddings/{}.mat'.format(pred_data_name)), 
-                                {'recons': recons, 'inputs': grdths, 'label': labels})
 
 
 def print_results(exp_dir, met_name, mets):
