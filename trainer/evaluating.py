@@ -40,6 +40,7 @@ def evaluate_epoch(model, data_loaders, metrics, exp_dir, hparams, eval_config, 
             dsts_data, vpds_data = None, None
             for idx, batch in enumerate(data_loader):
                 x, D, x_state, D_state, label = batch
+                
                 if total_len is not None:
                     x = x[:, :total_len]
 
@@ -52,7 +53,8 @@ def evaluate_epoch(model, data_loaders, metrics, exp_dir, hparams, eval_config, 
                     D = D.to(device)
                     x_ = model.prediction(x, D)
                 else:
-                    x_, mu_0, var_0, mu_c, var_c = model(x)
+                    # x_, mu_0, var_0, mu_c, var_c = model(x)
+                    x_, mu_0, var_0, mu_c, var_c = model.prediction(x)
                 
                 if B == 1:
                     x_ = torch.reshape(x_, x.size())
