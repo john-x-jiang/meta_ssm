@@ -621,10 +621,18 @@ class LatentStateEncoderFlow(nn.Module):
             nn.Tanh(),
             Flatten(),
         )
+        # self.layer1 = nn.LSTM(88, 128, batch_first=True)
+        # self.layer2 = nn.LSTM(128, 256, batch_first=True)
+        # self.layer3 = nn.LSTM(256, num_filters, batch_first=True)
+        # self.flatten = Flatten()
+        # self.act = nn.ReLU()
+
         if stochastic:
             self.output = Gaussian(num_filters * 4 ** 2, latent_dim)
+            # self.output = Gaussian(num_filters * time_steps, latent_dim)
         else:
             self.output = nn.Linear(num_filters * 4 ** 2, latent_dim)
+            # self.output = nn.Linear(num_filters * time_steps, latent_dim)
 
     def forward(self, x):
         """
@@ -632,12 +640,21 @@ class LatentStateEncoderFlow(nn.Module):
         :param x: input sequences [BatchSize, GenerationLen * NumChannels, H, W]
         :return: z0 over the batch [BatchSize, LatentDim]
         """
+        z = self.initial_encoder(x[:, :self.time_steps * self.num_channels])
+        # B = x.shape[0]
+        # x = x.view(B, self.time_steps, -1)
+        # z, _ = self.layer1(x)
+        # z = self.act(z)
+        # z, _ = self.layer2(z)
+        # z = self.act(z)
+        # z, _ = self.layer3(z)
+        # z = self.act(z)
+        # z = z.reshape(B, -1)
+
         if self.stochastic:
-            z = self.initial_encoder(x[:, :self.time_steps * self.num_channels])
             mu, var, z = self.output(z)
             return mu, var, z
         else:
-            z = self.initial_encoder(x[:, :self.time_steps * self.num_channels])
             z = self.output(z)
             return z
 
@@ -687,49 +704,6 @@ class LatentDomainEncoderFlow(nn.Module):
             return z
 
 
-class LatentDomainEncoderDKF_Flow(nn.Module):
-    def __init__(self, num_filters, num_channels, latent_dim, stochastic=True):
-        """
-        Holds the convolutional encoder that takes in a sequence of images and outputs the
-        domain of the latent dynamics
-        :param time_steps: how many GT steps are used in domain
-        :param num_filters: base convolutional filters, upscaled by 2 every layer
-        :param num_channels: how many image color channels there are
-        :param latent_dim: dimension of the latent dynamics
-        """
-        super().__init__()
-        self.num_channels = num_channels
-        self.stochastic = stochastic
-
-        # Encoder, q(z_0 | x_{0:time_steps})
-        self.encoder = nn.Sequential(
-            SpatialBlock(num_channels, num_filters, False),
-            SpatialBlock(num_filters, num_filters * 2, False),
-            SpatialBlock(num_filters * 2, num_filters * 4, False),
-            SpatialBlock(num_filters * 4, num_filters, True)
-        )
-        if stochastic:
-            self.output = Gaussian(num_filters * 4 ** 2, latent_dim)
-        else:
-            self.output = nn.Linear(num_filters * 4 ** 2, latent_dim)
-
-    def forward(self, x):
-        """
-        Handles getting the initial state given x and saving the distributional parameters
-        :param x: input sequences [BatchSize, GenerationLen * NumChannels, H, W]
-        :return: z0 over the batch [BatchSize, LatentDim]
-        """
-        B, T, H, W = x.shape
-        x = x.view(B, T, self.num_channels, H, W)
-        z = self.encoder(x)
-        if self.stochastic:
-            mu, var, z = self.output(z)
-            return mu, var, z
-        else:
-            z = self.output(z)
-            return z
-
-
 class EmissionDecoderFlow(nn.Module):
     def __init__(self, dim, num_filters, num_channels, latent_dim):
         """
@@ -751,18 +725,33 @@ class EmissionDecoderFlow(nn.Module):
             UnFlatten(4),
 
             # Perform de-conv to output space
-            nn.ConvTranspose2d(self.conv_dim // 16, num_filters * 8, kernel_size=5, stride=2, padding=(2, 2), output_padding=(1, 1)),
-            nn.BatchNorm2d(num_filters * 8),
+            # nn.ConvTranspose2d(self.conv_dim // 16, num_filters * 8, kernel_size=5, stride=2, padding=(2, 2), output_padding=(1, 1)),
+            # nn.BatchNorm2d(num_filters * 8),
+            # nn.LeakyReLU(0.1),
+            # nn.ConvTranspose2d(num_filters * 8, num_filters * 4, kernel_size=5, stride=2, padding=(2, 2), output_padding=(1, 1)),
+            # nn.BatchNorm2d(num_filters * 4),
+            # nn.LeakyReLU(0.1),
+            # nn.ConvTranspose2d(num_filters * 4, num_filters * 2, kernel_size=5, stride=2, padding=(2, 2), output_padding=(1, 1)),
+            # nn.BatchNorm2d(num_filters * 2),
+            # nn.LeakyReLU(0.1),
+            # nn.ConvTranspose2d(num_filters * 2, num_channels, kernel_size=5, stride=2, padding=(2, 2), output_padding=(1, 1)),
+            # nn.Sigmoid(),
+
+            nn.ConvTranspose2d(self.conv_dim // 16, num_filters * 8, kernel_size=4, stride=2, padding=(1, 1)),
             nn.LeakyReLU(0.1),
-            nn.ConvTranspose2d(num_filters * 8, num_filters * 4, kernel_size=5, stride=2, padding=(2, 2), output_padding=(1, 1)),
-            nn.BatchNorm2d(num_filters * 4),
+            nn.ConvTranspose2d(num_filters * 8, num_filters * 4, kernel_size=4, stride=2, padding=(1, 1)),
             nn.LeakyReLU(0.1),
-            nn.ConvTranspose2d(num_filters * 4, num_filters * 2, kernel_size=5, stride=2, padding=(2, 2), output_padding=(1, 1)),
-            nn.BatchNorm2d(num_filters * 2),
+            nn.ConvTranspose2d(num_filters * 4, num_filters * 2, kernel_size=4, stride=2, padding=(1, 1)),
             nn.LeakyReLU(0.1),
-            nn.ConvTranspose2d(num_filters * 2, num_channels, kernel_size=5, stride=2, padding=(2, 2), output_padding=(1, 1)),
-            nn.Sigmoid(),
+            nn.ConvTranspose2d(num_filters * 2, num_channels, kernel_size=4, stride=2, padding=(1, 1)),
+            nn.LeakyReLU(0.1),
         )
+        # self.layer1 = nn.LSTM(latent_dim, num_filters * 2, batch_first=True)
+        # self.layer2 = nn.LSTM(num_filters * 2, num_filters * 4, batch_first=True)
+        # self.layer3 = nn.LSTM(num_filters * 4, num_filters * 2, batch_first=True)
+        # self.layer4 = nn.LSTM(num_filters * 2, 88, batch_first=True)
+        # self.act = nn.ReLU()
+        # self.act_last = nn.Sigmoid()
 
     def forward(self, zts, batch_size, T):
         """
@@ -771,14 +760,125 @@ class EmissionDecoderFlow(nn.Module):
         :return: data output [BatchSize, GenerationLen, NumChannels, H, W]
         """
         x_rec = self.decoder(zts)
+        # zts = zts.view(batch_size, T, -1)
+        # z, _ = self.layer1(zts)
+        # z = self.act(z)
+        # z, _ = self.layer2(z)
+        # z = self.act(z)
+        # z, _ = self.layer3(z)
+        # z = self.act(z)
+        # z, _ = self.layer4(z)
+        # x_rec = self.act_last(z)
 
         # Reshape to image output
         x_rec = x_rec.view([batch_size, T, self.num_channels, self.dim, self.dim])
+        # x_rec = x_rec.view([batch_size, T, self.num_channels, self.dim])
         x_rec = torch.squeeze(x_rec)
         return x_rec
 
 '''
 End Turbulence Flow
+'''
+
+
+'''
+Music Data
+'''
+
+class LatentStateEncoderMusic(nn.Module):
+    def __init__(self, time_steps, num_filters, num_channels, latent_dim, stochastic=True):
+        """
+        Holds the convolutional encoder that takes in a sequence of images and outputs the
+        initial state of the latent dynamics
+        :param time_steps: how many GT steps are used in initialization
+        :param num_filters: base convolutional filters, upscaled by 2 every layer
+        :param num_channels: how many image color channels there are
+        :param latent_dim: dimension of the latent dynamics
+        """
+        super().__init__()
+        self.time_steps = time_steps
+        self.num_channels = num_channels
+        self.stochastic = stochastic
+
+        # Encoder, q(z_0 | x_{0:time_steps})
+        self.layer1 = nn.LSTM(88, 128, batch_first=True)
+        self.layer2 = nn.LSTM(128, 256, batch_first=True)
+        self.layer3 = nn.LSTM(256, num_filters, batch_first=True)
+        self.act = nn.ReLU()
+
+        if stochastic:
+            self.output = Gaussian(num_filters * time_steps, latent_dim)
+        else:
+            self.output = nn.Linear(num_filters * time_steps, latent_dim)
+
+    def forward(self, x):
+        """
+        Handles getting the initial state given x and saving the distributional parameters
+        :param x: input sequences [BatchSize, GenerationLen * NumChannels, H, W]
+        :return: z0 over the batch [BatchSize, LatentDim]
+        """
+        B = x.shape[0]
+        x = x.view(B, self.time_steps, -1)
+        z, _ = self.layer1(x)
+        z = self.act(z)
+        z, _ = self.layer2(z)
+        z = self.act(z)
+        z, _ = self.layer3(z)
+        z = self.act(z)
+        z = z.reshape(B, -1)
+
+        if self.stochastic:
+            mu, var, z = self.output(z)
+            return mu, var, z
+        else:
+            z = self.output(z)
+            return z
+
+
+class EmissionDecoderMusic(nn.Module):
+    def __init__(self, dim, num_filters, num_channels, latent_dim):
+        """
+        Holds the convolutional decoder that takes in a batch of individual latent states and
+        transforms them into their corresponding data space reconstructions
+        """
+        super().__init__()
+        self.dim = dim
+        self.num_channels = num_channels
+
+        # Variable that holds the estimated output for the flattened convolution vector
+        # self.conv_dim = num_filters * 4 ** 2
+
+        # Emission model handling z_i -> x_i
+        self.layer1 = nn.LSTM(latent_dim, num_filters * 2, batch_first=True)
+        self.layer2 = nn.LSTM(num_filters * 2, num_filters * 4, batch_first=True)
+        self.layer3 = nn.LSTM(num_filters * 4, num_filters * 2, batch_first=True)
+        self.layer4 = nn.LSTM(num_filters * 2, 88, batch_first=True)
+        self.act = nn.ReLU()
+        self.act_last = nn.Sigmoid()
+
+    def forward(self, zts, batch_size, T):
+        """
+        Handles decoding a batch of individual latent states into their corresponding data space reconstructions
+        :param zts: latent states [BatchSize * GenerationLen, LatentDim]
+        :return: data output [BatchSize, GenerationLen, NumChannels, H, W]
+        """
+        zts = zts.view(batch_size, T, -1)
+        z, _ = self.layer1(zts)
+        z = self.act(z)
+        z, _ = self.layer2(z)
+        z = self.act(z)
+        z, _ = self.layer3(z)
+        z = self.act(z)
+        z, _ = self.layer4(z)
+        x_rec = self.act_last(z)
+
+        # Reshape to image output
+        x_rec = x_rec.view([batch_size, T, self.num_channels, self.dim])
+        x_rec = torch.squeeze(x_rec)
+        return x_rec
+
+'''
+End Music Data
 '''
 
 

@@ -23,6 +23,10 @@ class PymunkData(Dataset):
         self.images = npzfile['images'].astype(np.float32)
         if config['out_distr'] == 'bernoulli':
             self.images = (self.images > 0).astype('float32')
+        elif config['out_distr'] == 'norm':
+            self.images = self.normalize(self.images)
+        elif config['out_distr'] == 'none':
+            pass
 
         self.labels = npzfile['label'].astype(np.int16)
 
@@ -39,7 +43,7 @@ class PymunkData(Dataset):
             self.state_dim = self.state.shape[-1]
 
         # Get data dimensions
-        self.sequences, self.timesteps, self.d1, self.d2 = self.images.shape
+        self.sequences, self.timesteps = self.images.shape[0], self.images.shape[1]
 
         # We set controls to zero (we don't use them even if dim_u=1). If they are fixed to one instead (and dim_u=1)
         # the B matrix represents a bias.
@@ -61,85 +65,10 @@ class PymunkData(Dataset):
         label = torch.Tensor([label])
 
         return torch.Tensor([idx]), image, state, control, label
-
-
-class PymunkSetData(Dataset):
-    """
-    Load sequences of images
-    """
-    def __init__(self, file_path, config):
-        self.k_shot = config['k_shot']
-        self.shuffle = config['shuffle']
-        self.is_train = config['is_train']
-        # Load data
-        npzfile = np.load(file_path)
-        self.images = npzfile['images'].astype(np.float32)
-        if config['out_distr'] == 'bernoulli':
-            self.images = (self.images > 0).astype('float32')
-
-        self.labels = npzfile['label'].astype(np.int16)
-        self.label_idx = {}
-        for label in np.unique(self.labels):
-            idx = np.where(self.labels == label)[0]
-            self.label_idx[label] = idx
-
-        # Load ground truth position and velocity (if present). This is not used in the KVAE experiments in the paper.
-        if 'state' in npzfile:
-            # Only load the position, not velocity
-            self.state = npzfile['state'].astype(np.float32)[:, :, :2]
-            # self.velocity = npzfile['state'].astype(np.float32)[:, :, 2:]
-
-            # Normalize the mean
-            # self.state = self.state - self.state.mean(axis=(0, 1))
-
-            # Set state dimension
-            self.state_dim = self.state.shape[-1]
-
-        # Get data dimensions
-        self.sequences, self.timesteps, self.d1, self.d2 = self.images.shape
-
-        # We set controls to zero (we don't use them even if dim_u=1). If they are fixed to one instead (and dim_u=1)
-        # the B matrix represents a bias.
-        self.controls = np.zeros((self.sequences, self.timesteps, config['dim_u']), dtype=np.float32)
-
-        for i in self.label_idx.keys():
-            self.label_idx[i] = np.sort(self.label_idx[i])
-
-    def __len__(self):
-        return self.images.shape[0]
-
-    def __getitem__(self, idx):
-        """ Couple images and controls together for compatibility with other datasets """
-        label = self.labels[idx]
-        image = self.images[idx, :]
-        state = self.state[idx, :]
-        control = self.controls[idx, :]
-
-        samples = self.label_idx[label]
-        samples = np.delete(samples, np.where(samples == idx)[0])
-        selected_idx = np.random.choice(len(samples), self.k_shot, replace=False)
-        selected_samples = samples[selected_idx]
-        
-        images_D = []
-        state_D = []
-        control_D = []
-        for item in selected_samples:
-            images_D.append(self.images[[item], :])
-            state_D.append(self.state[[item], :])
-            control_D.append(self.controls[[item], :])
-        images_D = np.concatenate(images_D, axis=0)
-        state_D = np.concatenate(state_D, axis=0)
-        control_D = np.concatenate(control_D, axis=0)
-
-        image = torch.from_numpy(image)
-        state = torch.from_numpy(state)
-        control = torch.from_numpy(control)
-        label = torch.Tensor([label])
-        images_D = torch.from_numpy(images_D)
-        state_D = torch.from_numpy(state_D)
-        control_D = torch.from_numpy(control_D)
-
-        return torch.Tensor([idx]), image, state, control, label, images_D, state_D, control_D
+    
+    def normalize(self, images):
+        norm_images = images / 10
+        return norm_images
 
 
 class PymunkEpisoticData(Dataset):
@@ -154,6 +83,10 @@ class PymunkEpisoticData(Dataset):
         self.images = npzfile['images'].astype(np.float32)
         if config['out_distr'] == 'bernoulli':
             self.images = (self.images > 0).astype('float32')
+        elif config['out_distr'] == 'norm':
+            self.images = self.normalize(self.images)
+        elif config['out_distr'] == 'none':
+            pass
 
         # self.images = torch.from_numpy(self.images).to(device=torch.Tensor().device)
 
@@ -177,7 +110,7 @@ class PymunkEpisoticData(Dataset):
             self.state_dim = self.state.shape[-1]
 
         # Get data dimensions
-        self.sequences, self.timesteps, self.d1, self.d2 = self.images.shape
+        self.sequences, self.timesteps = self.images.shape[0], self.images.shape[1]
 
         # We set controls to zero (we don't use them even if dim_u=1). If they are fixed to one instead (and dim_u=1)
         # the B matrix represents a bias.
@@ -230,6 +163,10 @@ class PymunkEpisoticData(Dataset):
         
         self.qry_idx = np.array(self.qry_idx)
         self.qry_idx = np.sort(self.qry_idx)
+    
+    def normalize(self, images):
+        norm_images = images / 100
+        return norm_images
 
 
 if __name__ == '__main__':

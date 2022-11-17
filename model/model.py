@@ -738,6 +738,7 @@ class BaseFlow(BaseModel):
     def latent_initialization(self, x):
         batch_size = x.shape[0]
         x = x.view(batch_size, self.init_dim, self.input_dim, self.input_dim)
+        # x = x.view(batch_size, self.init_dim, self.input_dim)
         z_0, mu_0, var_0 = self.initial_function(x)
         return z_0, mu_0, var_0
 
@@ -890,299 +891,78 @@ class MetaFlow(BaseModel):
         return x_
 
 
-class DKF_Flow(BaseModel):
+class BaseMusic(BaseModel):
     def __init__(self,
                  input_dim,
                  latent_dim,
-                 rnn_dim,
+                 obs_filters,
                  obs_dim,
-                 rnn_bidirection,
-                 rnn_type,
-                 rnn_layers,
+                 init_filters,
+                 init_dim,
                  ems_filters,
-                 trans_args,
-                 estim_args):
+                 domain,
+                 trans_model,
+                 trans_args):
         super().__init__()
         self.input_dim = input_dim
         self.latent_dim = latent_dim
-        self.rnn_dim = rnn_dim
+        self.obs_filters = obs_filters
         self.obs_dim = obs_dim
-        self.rnn_bidirection = rnn_bidirection
-        self.rnn_type = rnn_type
-        self.rnn_layers = rnn_layers
+        self.init_filters = init_filters
+        self.init_dim = init_dim
         self.ems_filters = ems_filters
+        self.domain = domain
+        self.trans_model = trans_model
         self.trans_args = trans_args
-        self.estim_args = estim_args
 
-        # observation
-        self.embedding = nn.Sequential(
-            nn.Linear(input_dim**2, 2 * input_dim**2),
-            nn.ReLU(),
-            nn.Linear(2 * input_dim**2, 2 * input_dim**2),
-            nn.ReLU(),
-            nn.Linear(2 * input_dim**2, rnn_dim),
-            nn.ReLU()
-        )
-        self.encoder = RnnEncoder(rnn_dim, rnn_dim,
-                                  n_layer=rnn_layers, drop_rate=0.0,
-                                  bd=rnn_bidirection, nonlin='relu',
-                                  rnn_type=rnn_type,
-                                  reverse_input=False)
+        # initialization
+        self.initial_function = LatentStateEncoderMusic(init_dim, init_filters, 1, latent_dim)
 
         # generative model
         self.transition = Transition_Recurrent(**trans_args)
-        self.estimation = Correction(**estim_args)
-
-        self.emission = EmissionDecoderFlow(input_dim, ems_filters, 1, latent_dim)
-
-        # initialize hidden states
-        self.mu_p_0, self.var_p_0 = self.transition.init_z_0(trainable=False)
-        self.z_q_0 = self.estimation.init_z_q_0(trainable=False)
+        self.emission = EmissionDecoderMusic(input_dim, ems_filters, 1, latent_dim)
     
-    def reparameterization(self, mu, var):
-        std = torch.exp(0.5 * var)
-        eps = torch.randn_like(std)
-        return mu + eps * std
+    def latent_initialization(self, x):
+        batch_size = x.shape[0]
+        x = x.view(batch_size, self.init_dim, self.input_dim)
+        z_0, mu_0, var_0 = self.initial_function(x)
+        return z_0, mu_0, var_0
 
-    def latent_dynamics(self, T, x_rnn):
-        batch_size = x_rnn.shape[0]
-        obs_dim = x_rnn.shape[1]
+    def latent_dynamics(self, T, z_0, z_c=None):
+        batch_size = z_0.shape[0]
+        if self.trans_model in ['recurrent', 'RGN_residual']:
+            z_ = torch.zeros([batch_size, T, self.latent_dim]).to(device)
+            z_prev = z_0
+            z_[:, 0, :] = z_prev
 
-        if T > obs_dim:
-            T_final = T
-        else:
-            T_final = obs_dim
-
-        z_ = torch.zeros([batch_size, T_final, self.latent_dim]).to(device)
-        mu_ps = torch.zeros([batch_size, obs_dim, self.latent_dim]).to(device)
-        var_ps = torch.zeros([batch_size, obs_dim, self.latent_dim]).to(device)
-        mu_qs = torch.zeros([batch_size, obs_dim, self.latent_dim]).to(device)
-        var_qs = torch.zeros([batch_size, obs_dim, self.latent_dim]).to(device)
-
-        z_q_0 = self.z_q_0.expand(batch_size, self.latent_dim)  # q(z_0)
-        mu_p_0 = self.mu_p_0.expand(batch_size, 1, self.latent_dim)
-        var_p_0 = self.var_p_0.expand(batch_size, 1, self.latent_dim)
-        z_prev = z_q_0
-        z_[:, 0, :] = z_prev
-
-        for t in range(obs_dim):
-            # zt = self.transition(z_prev)
-            mu_q, var_q = self.estimation(x_rnn[:, t, :], z_prev,
-                                          rnn_bidirection=self.rnn_bidirection)
-            zt_q = self.reparameterization(mu_q, var_q)
-            z_prev = zt_q
-
-            # p(z_{t+1} | z_t)
-            mu_p, var_p = self.transition(z_prev)
-            zt_p = self.reparameterization(mu_p, var_p)
-
-            z_[:, t, :] = zt_q
-            mu_qs[:, t, :] = mu_q
-            var_qs[:, t, :] = var_q
-            mu_ps[:, t, :] = mu_p
-            var_ps[:, t, :] = var_p
-        
-        if T > obs_dim:
-            for t in range(obs_dim, T):
-                # p(z_{t+1} | z_t)
-                mu_p, var_p = self.transition(z_prev)
-                zt_p = self.reparameterization(mu_p, var_p)
-                z_[:, t, :] = zt_p
-                z_prev = zt_p
-        
-        mu_ps = torch.cat([mu_p_0, mu_ps[:, :-1, :]], dim=1)
-        var_ps = torch.cat([var_p_0, var_ps[:, :-1, :]], dim=1)
-
-        return z_, mu_qs, var_qs, mu_ps, var_ps
+            for t in range(1, T):
+                zt = self.transition(z_prev, z_c)
+                z_prev = zt
+                z_[:, t, :] = zt
+        elif self.trans_model in ['ODE',]:
+            z_ = self.transition(T, z_0, z_c)
+        return z_
 
     def forward(self, x):
         T = x.size(1)
         batch_size = x.size(0)
 
-        x = x.view(batch_size, T, -1)
-        x = self.embedding(x)
-        x_rnn = self.encoder(x)
-
-        z_, mu_qs, var_qs, mu_ps, var_ps = self.latent_dynamics(T, x_rnn)
-        
+        z_c, mu_c, var_c = None, None, None
+        z_0, mu_0, var_0 = self.latent_initialization(x[:, :self.init_dim, :])
+        z_ = self.latent_dynamics(T, z_0, z_c)
         z_ = z_.view(batch_size * T, -1)
         x_ = self.emission(z_, batch_size, T)
 
-        return x_, mu_qs, var_qs, mu_ps, var_ps
+        return x_, mu_0, var_0, mu_c, var_c
     
     def prediction(self, x):
         T = x.size(1)
         batch_size = x.size(0)
 
-        x = x.view(batch_size, T, -1)
-        x = x[:, :self.obs_dim, :]
-
-        x = self.embedding(x)
-        x_rnn = self.encoder(x)
-
-        z_, mu_qs, var_qs, mu_ps, var_ps = self.latent_dynamics(T, x_rnn)
-        
+        z_c, mu_c, var_c = None, None, None
+        z_0, mu_0, var_0 = self.latent_initialization(x[:, :self.init_dim, :])
+        z_ = self.latent_dynamics(T, z_0, z_c)
         z_ = z_.view(batch_size * T, -1)
         x_ = self.emission(z_, batch_size, T)
 
-        return x_, mu_qs, var_qs, mu_ps, var_ps
-
-
-class MetaDKF_Flow(BaseModel):
-    def __init__(self,
-                 input_dim,
-                 latent_dim,
-                 rnn_dim,
-                 obs_dim,
-                 obs_filters,
-                 rnn_bidirection,
-                 rnn_type,
-                 rnn_layers,
-                 ems_filters,
-                 trans_args,
-                 estim_args):
-        super().__init__()
-        self.input_dim = input_dim
-        self.latent_dim = latent_dim
-        self.rnn_dim = rnn_dim
-        self.obs_dim = obs_dim
-        self.obs_filters = obs_filters
-        self.rnn_bidirection = rnn_bidirection
-        self.rnn_type = rnn_type
-        self.rnn_layers = rnn_layers
-        self.ems_filters = ems_filters
-        self.trans_args = trans_args
-        self.estim_args = estim_args
-
-        # domain
-        self.domain_function = LatentDomainEncoderDKF_Flow(obs_filters, 1, latent_dim, stochastic=False)
-
-        # observation
-        self.embedding = nn.Sequential(
-            nn.Linear(input_dim**2, 2 * input_dim**2),
-            nn.ReLU(),
-            nn.Linear(2 * input_dim**2, 2 * input_dim**2),
-            nn.ReLU(),
-            nn.Linear(2 * input_dim**2, rnn_dim),
-            nn.ReLU()
-        )
-        self.encoder = RnnEncoder(rnn_dim, rnn_dim,
-                                  n_layer=rnn_layers, drop_rate=0.0,
-                                  bd=rnn_bidirection, nonlin='relu',
-                                  rnn_type=rnn_type,
-                                  reverse_input=False)
-
-        # generative model
-        self.transition = Transition_Recurrent(**trans_args)
-        self.estimation = Correction(**estim_args)
-
-        self.emission = EmissionDecoderFlow(input_dim, ems_filters, 1, latent_dim)
-
-        # initialize hidden states
-        self.mu_p_0, self.var_p_0 = self.transition.init_z_0(trainable=False)
-        self.z_q_0 = self.estimation.init_z_q_0(trainable=False)
-    
-    def reparameterization(self, mu, var):
-        std = torch.exp(0.5 * var)
-        eps = torch.randn_like(std)
-        return mu + eps * std
-    
-    def latent_domain(self, D, K):
-        D_z_c = []
-        for k in range(K):
-            x_i = D[:, k, :]
-            z_c_i = self.domain_function(x_i)
-            D_z_c.append(z_c_i)
-        
-        z_c = sum(D_z_c) / len(D_z_c)
-        return z_c
-
-    def latent_dynamics(self, T, x_rnn, z_c):
-        batch_size = x_rnn.shape[0]
-        obs_dim = x_rnn.shape[1]
-
-        if T > obs_dim:
-            T_final = T
-        else:
-            T_final = obs_dim
-
-        z_ = torch.zeros([batch_size, T_final, self.latent_dim]).to(device)
-        mu_ps = torch.zeros([batch_size, obs_dim, self.latent_dim]).to(device)
-        var_ps = torch.zeros([batch_size, obs_dim, self.latent_dim]).to(device)
-        mu_qs = torch.zeros([batch_size, obs_dim, self.latent_dim]).to(device)
-        var_qs = torch.zeros([batch_size, obs_dim, self.latent_dim]).to(device)
-
-        z_q_0 = self.z_q_0.expand(batch_size, self.latent_dim)  # q(z_0)
-        mu_p_0 = self.mu_p_0.expand(batch_size, 1, self.latent_dim)
-        var_p_0 = self.var_p_0.expand(batch_size, 1, self.latent_dim)
-        z_prev = z_q_0
-        z_[:, 0, :] = z_prev
-
-        for t in range(obs_dim):
-            # zt = self.transition(z_prev)
-            mu_q, var_q = self.estimation(x_rnn[:, t, :], z_prev,
-                                          rnn_bidirection=self.rnn_bidirection,
-                                          z_c=z_c[:, t])
-            zt_q = self.reparameterization(mu_q, var_q)
-            z_prev = zt_q
-
-            # p(z_{t+1} | z_t)
-            mu_p, var_p = self.transition(z_prev, z_c[:, t])
-            zt_p = self.reparameterization(mu_p, var_p)
-
-            z_[:, t, :] = zt_q
-            mu_qs[:, t, :] = mu_q
-            var_qs[:, t, :] = var_q
-            mu_ps[:, t, :] = mu_p
-            var_ps[:, t, :] = var_p
-        
-        if T > obs_dim:
-            for t in range(obs_dim, T):
-                # p(z_{t+1} | z_t)
-                mu_p, var_p = self.transition(z_prev, z_c[:, t])
-                zt_p = self.reparameterization(mu_p, var_p)
-                z_[:, t, :] = zt_p
-                z_prev = zt_p
-        
-        mu_ps = torch.cat([mu_p_0, mu_ps[:, :-1, :]], dim=1)
-        var_ps = torch.cat([var_p_0, var_ps[:, :-1, :]], dim=1)
-
-        return z_, mu_qs, var_qs, mu_ps, var_ps
-
-    def forward(self, x, D):
-        T = x.size(1)
-        batch_size = x.size(0)
-        
-        K = D.shape[1]
-        z_c = self.latent_domain(D, K)
-
-        x = x.view(batch_size, T, -1)
-        # x = x[:, :self.obs_dim, :]
-        x = self.embedding(x)
-        x_rnn = self.encoder(x)
-
-        z_, mu_qs, var_qs, mu_ps, var_ps = self.latent_dynamics(T, x_rnn, z_c)
-        
-        z_ = z_.view(batch_size * T, -1)
-        x_ = self.emission(z_, batch_size, T)
-
-        return x_, mu_qs, var_qs, mu_ps, var_ps, None, None
-    
-    def prediction(self, x, D):
-        T = x.size(1)
-        batch_size = x.size(0)
-
-        K = D.shape[1]
-        z_c = self.latent_domain(D, K)
-
-        x = x.view(batch_size, T, -1)
-        x = x[:, :self.obs_dim, :]
-        x = self.embedding(x)
-        x_rnn = self.encoder(x)
-
-        z_, mu_qs, var_qs, mu_ps, var_ps = self.latent_dynamics(T, x_rnn, z_c)
-        
-        z_ = z_.view(batch_size * T, -1)
-        x_ = self.emission(z_, batch_size, T)
-
-        return x_
+        return x_, mu_0, var_0, mu_c, var_c
