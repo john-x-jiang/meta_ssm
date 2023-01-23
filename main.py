@@ -45,6 +45,7 @@ def data_loading(hparams, stage=1):
     num_workers = data_config['num_workers']
     data_name = data_config['data_name']
     k_shot = data_config['k_shot']
+    out_distr = data_config.get('out_distr')
 
     if stage == 1:
         batch_size = hparams.batch_size
@@ -56,6 +57,7 @@ def data_loading(hparams, stage=1):
             split=split_train,
             shuffle=shuffle_train,
             num_workers=num_workers,
+            out_distr=out_distr,
             data_name=data_name,
             k_shot=k_shot
         )
@@ -68,6 +70,7 @@ def data_loading(hparams, stage=1):
             split=split_val,
             shuffle=shuffle_val,
             num_workers=num_workers,
+            out_distr=out_distr,
             data_name=data_name,
             k_shot=k_shot
         )
@@ -84,6 +87,7 @@ def data_loading(hparams, stage=1):
                 split=eval_tag,
                 shuffle=shuffle_test,
                 num_workers=num_workers,
+                out_distr=out_distr,
                 data_name=data_name,
                 k_shot=k_shot
             )
@@ -102,6 +106,7 @@ def data_loading(hparams, stage=1):
                 split=eval_tag,
                 shuffle=shuffle_test,
                 num_workers=num_workers,
+                out_distr=out_distr,
                 data_name=data_name,
                 k_shot=k_shot
             )
@@ -111,6 +116,7 @@ def data_loading(hparams, stage=1):
                 split=pred_tag,
                 shuffle=shuffle_test,
                 num_workers=num_workers,
+                out_distr=out_distr,
                 data_name=data_name,
                 k_shot=k_shot
             )

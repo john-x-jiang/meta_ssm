@@ -118,7 +118,8 @@ class LatentStateEncoder(nn.Module):
 
 
 class SpatialTemporalBlock(nn.Module):
-    def __init__(self, t_in, t_out, n_in, n_out, num_channels, last):
+    def __init__(self, t_in, t_out, n_in, n_out, num_channels, last,
+                 kernel_size=5, stride=2, padding=(2, 2)):
         super().__init__()
         self.t_in = t_in
         self.t_out = t_out
@@ -127,7 +128,7 @@ class SpatialTemporalBlock(nn.Module):
         self.num_channels = num_channels
         self.last = last
 
-        self.conv = nn.Conv2d(n_in, n_out, kernel_size=5, stride=2, padding=(2, 2))
+        self.conv = nn.Conv2d(n_in, n_out, kernel_size=kernel_size, stride=stride, padding=padding)
         self.bn = nn.BatchNorm2d(n_out)
         self.act = nn.LeakyReLU(0.1)
         self.lin_t = nn.Linear(t_in, t_out)
@@ -560,7 +561,7 @@ class Transition_ODE(nn.Module):
         self.acts = []
         self.layer_norms = []
         for i, (n_in, n_out) in enumerate(zip(self.layers_dim[:-1], self.layers_dim[1:])):
-            self.acts.append(get_act('leaky_relu') if i < ode_layer else get_act('linear'))
+            self.acts.append(get_act('swish') if i < ode_layer else get_act('tanh'))
             self.layers.append(nn.Linear(n_in, n_out, device=device))
             self.layer_norms.append(nn.LayerNorm(n_out, device=device) if True and i < ode_layer else nn.Identity())
     
@@ -579,7 +580,7 @@ class Transition_ODE(nn.Module):
         else:
             z_in = z_0
 
-        zt = odeint(solver, z_in, t, method='rk4', rtol=1e-5, atol=1e-7, options={'step_size': 0.5})
+        zt = odeint(solver, z_in, t, method='rk4', rtol=1e-5, atol=1e-7, options={'step_size': 0.25})
         zt = zt.permute(1, 0, 2).contiguous()
         if self.domain:
             zt = self.combine(zt)
@@ -608,31 +609,28 @@ class LatentStateEncoderFlow(nn.Module):
 
         # Encoder, q(z_0 | x_{0:time_steps})
         self.initial_encoder = nn.Sequential(
-            nn.Conv2d(time_steps * num_channels, num_filters, kernel_size=5, stride=2, padding=(2, 2)),  # 14,14
+            # nn.Conv2d(time_steps * num_channels, num_filters, kernel_size=5, stride=2, padding=(2, 2)),  # 14,14
+            nn.Conv2d(time_steps * num_channels, num_filters, kernel_size=3, stride=2, padding=(1, 1)),  # 14,14
             nn.BatchNorm2d(num_filters),
             nn.LeakyReLU(0.1),
-            nn.Conv2d(num_filters, num_filters * 2, kernel_size=5, stride=2, padding=(2, 2)),  # 7,7
+            # nn.Conv2d(num_filters, num_filters * 2, kernel_size=5, stride=2, padding=(2, 2)),  # 7,7
+            nn.Conv2d(num_filters, num_filters * 2, kernel_size=3, stride=2, padding=(1, 1)),  # 7,7
             nn.BatchNorm2d(num_filters * 2),
             nn.LeakyReLU(0.1),
-            nn.Conv2d(num_filters * 2, num_filters * 4, kernel_size=5, stride=2, padding=(2, 2)),  # 7,7
+            # nn.Conv2d(num_filters * 2, num_filters * 4, kernel_size=5, stride=2, padding=(2, 2)),  # 7,7
+            nn.Conv2d(num_filters * 2, num_filters * 4, kernel_size=3, stride=2, padding=(1, 1)),  # 7,7
             nn.BatchNorm2d(num_filters * 4),
             nn.LeakyReLU(0.1),
-            nn.Conv2d(num_filters * 4, num_filters, kernel_size=5, stride=2, padding=(2, 2)),
+            # nn.Conv2d(num_filters * 4, num_filters, kernel_size=5, stride=2, padding=(2, 2)),
+            nn.Conv2d(num_filters * 4, num_filters, kernel_size=3, stride=2, padding=(1, 1)),
             nn.Tanh(),
             Flatten(),
         )
-        # self.layer1 = nn.LSTM(88, 128, batch_first=True)
-        # self.layer2 = nn.LSTM(128, 256, batch_first=True)
-        # self.layer3 = nn.LSTM(256, num_filters, batch_first=True)
-        # self.flatten = Flatten()
-        # self.act = nn.ReLU()
 
         if stochastic:
             self.output = Gaussian(num_filters * 4 ** 2, latent_dim)
-            # self.output = Gaussian(num_filters * time_steps, latent_dim)
         else:
             self.output = nn.Linear(num_filters * 4 ** 2, latent_dim)
-            # self.output = nn.Linear(num_filters * time_steps, latent_dim)
 
     def forward(self, x):
         """
@@ -640,16 +638,11 @@ class LatentStateEncoderFlow(nn.Module):
         :param x: input sequences [BatchSize, GenerationLen * NumChannels, H, W]
         :return: z0 over the batch [BatchSize, LatentDim]
         """
+        B, H, W = x.shape[0], x.shape[2], x.shape[3]
+        if self.num_channels > 1:
+            x = x.permute(0, 1, 4, 2, 3).contiguous()
+            x = x.view(B, self.time_steps * self.num_channels, H, W)
         z = self.initial_encoder(x[:, :self.time_steps * self.num_channels])
-        # B = x.shape[0]
-        # x = x.view(B, self.time_steps, -1)
-        # z, _ = self.layer1(x)
-        # z = self.act(z)
-        # z, _ = self.layer2(z)
-        # z = self.act(z)
-        # z, _ = self.layer3(z)
-        # z = self.act(z)
-        # z = z.reshape(B, -1)
 
         if self.stochastic:
             mu, var, z = self.output(z)
@@ -676,7 +669,7 @@ class LatentDomainEncoderFlow(nn.Module):
 
         # Encoder, q(z_0 | x_{0:time_steps})
         self.encoder = nn.Sequential(
-            SpatialTemporalBlock(time_steps, time_steps // 2, 1, num_filters, num_channels, False),
+            SpatialTemporalBlock(time_steps, time_steps // 2, num_channels, num_filters, num_channels, False),
             SpatialTemporalBlock(time_steps // 2, time_steps // 4, num_filters, num_filters * 2, num_channels, False),
             SpatialTemporalBlock(time_steps // 4, time_steps // 8, num_filters * 2, num_filters * 4, num_channels, False),
             SpatialTemporalBlock(time_steps // 8, 1, num_filters * 4, num_filters, num_channels, True),
@@ -693,7 +686,9 @@ class LatentDomainEncoderFlow(nn.Module):
         :param x: input sequences [BatchSize, GenerationLen * NumChannels, H, W]
         :return: z0 over the batch [BatchSize, LatentDim]
         """
-        B, _, H, W = x.shape
+        B, H, W = x.shape[0], x.shape[2], x.shape[3]
+        if self.num_channels > 1:
+            x = x.permute(0, 1, 4, 2, 3).contiguous()
         x = x.view(B, self.time_steps, self.num_channels, H, W)
         z = self.encoder(x)
         if self.stochastic:
@@ -725,18 +720,6 @@ class EmissionDecoderFlow(nn.Module):
             UnFlatten(4),
 
             # Perform de-conv to output space
-            # nn.ConvTranspose2d(self.conv_dim // 16, num_filters * 8, kernel_size=5, stride=2, padding=(2, 2), output_padding=(1, 1)),
-            # nn.BatchNorm2d(num_filters * 8),
-            # nn.LeakyReLU(0.1),
-            # nn.ConvTranspose2d(num_filters * 8, num_filters * 4, kernel_size=5, stride=2, padding=(2, 2), output_padding=(1, 1)),
-            # nn.BatchNorm2d(num_filters * 4),
-            # nn.LeakyReLU(0.1),
-            # nn.ConvTranspose2d(num_filters * 4, num_filters * 2, kernel_size=5, stride=2, padding=(2, 2), output_padding=(1, 1)),
-            # nn.BatchNorm2d(num_filters * 2),
-            # nn.LeakyReLU(0.1),
-            # nn.ConvTranspose2d(num_filters * 2, num_channels, kernel_size=5, stride=2, padding=(2, 2), output_padding=(1, 1)),
-            # nn.Sigmoid(),
-
             nn.ConvTranspose2d(self.conv_dim // 16, num_filters * 8, kernel_size=4, stride=2, padding=(1, 1)),
             nn.LeakyReLU(0.1),
             nn.ConvTranspose2d(num_filters * 8, num_filters * 4, kernel_size=4, stride=2, padding=(1, 1)),
@@ -744,14 +727,8 @@ class EmissionDecoderFlow(nn.Module):
             nn.ConvTranspose2d(num_filters * 4, num_filters * 2, kernel_size=4, stride=2, padding=(1, 1)),
             nn.LeakyReLU(0.1),
             nn.ConvTranspose2d(num_filters * 2, num_channels, kernel_size=4, stride=2, padding=(1, 1)),
-            nn.LeakyReLU(0.1),
+            # nn.LeakyReLU(0.1),
         )
-        # self.layer1 = nn.LSTM(latent_dim, num_filters * 2, batch_first=True)
-        # self.layer2 = nn.LSTM(num_filters * 2, num_filters * 4, batch_first=True)
-        # self.layer3 = nn.LSTM(num_filters * 4, num_filters * 2, batch_first=True)
-        # self.layer4 = nn.LSTM(num_filters * 2, 88, batch_first=True)
-        # self.act = nn.ReLU()
-        # self.act_last = nn.Sigmoid()
 
     def forward(self, zts, batch_size, T):
         """
@@ -760,125 +737,16 @@ class EmissionDecoderFlow(nn.Module):
         :return: data output [BatchSize, GenerationLen, NumChannels, H, W]
         """
         x_rec = self.decoder(zts)
-        # zts = zts.view(batch_size, T, -1)
-        # z, _ = self.layer1(zts)
-        # z = self.act(z)
-        # z, _ = self.layer2(z)
-        # z = self.act(z)
-        # z, _ = self.layer3(z)
-        # z = self.act(z)
-        # z, _ = self.layer4(z)
-        # x_rec = self.act_last(z)
 
         # Reshape to image output
         x_rec = x_rec.view([batch_size, T, self.num_channels, self.dim, self.dim])
-        # x_rec = x_rec.view([batch_size, T, self.num_channels, self.dim])
+        if self.num_channels > 1:
+            x_rec = x_rec.permute(0, 1, 3, 4, 2).contiguous()
         x_rec = torch.squeeze(x_rec)
         return x_rec
 
 '''
 End Turbulence Flow
-'''
-
-
-'''
-Music Data
-'''
-
-class LatentStateEncoderMusic(nn.Module):
-    def __init__(self, time_steps, num_filters, num_channels, latent_dim, stochastic=True):
-        """
-        Holds the convolutional encoder that takes in a sequence of images and outputs the
-        initial state of the latent dynamics
-        :param time_steps: how many GT steps are used in initialization
-        :param num_filters: base convolutional filters, upscaled by 2 every layer
-        :param num_channels: how many image color channels there are
-        :param latent_dim: dimension of the latent dynamics
-        """
-        super().__init__()
-        self.time_steps = time_steps
-        self.num_channels = num_channels
-        self.stochastic = stochastic
-
-        # Encoder, q(z_0 | x_{0:time_steps})
-        self.layer1 = nn.LSTM(88, 128, batch_first=True)
-        self.layer2 = nn.LSTM(128, 256, batch_first=True)
-        self.layer3 = nn.LSTM(256, num_filters, batch_first=True)
-        self.act = nn.ReLU()
-
-        if stochastic:
-            self.output = Gaussian(num_filters * time_steps, latent_dim)
-        else:
-            self.output = nn.Linear(num_filters * time_steps, latent_dim)
-
-    def forward(self, x):
-        """
-        Handles getting the initial state given x and saving the distributional parameters
-        :param x: input sequences [BatchSize, GenerationLen * NumChannels, H, W]
-        :return: z0 over the batch [BatchSize, LatentDim]
-        """
-        B = x.shape[0]
-        x = x.view(B, self.time_steps, -1)
-        z, _ = self.layer1(x)
-        z = self.act(z)
-        z, _ = self.layer2(z)
-        z = self.act(z)
-        z, _ = self.layer3(z)
-        z = self.act(z)
-        z = z.reshape(B, -1)
-
-        if self.stochastic:
-            mu, var, z = self.output(z)
-            return mu, var, z
-        else:
-            z = self.output(z)
-            return z
-
-
-class EmissionDecoderMusic(nn.Module):
-    def __init__(self, dim, num_filters, num_channels, latent_dim):
-        """
-        Holds the convolutional decoder that takes in a batch of individual latent states and
-        transforms them into their corresponding data space reconstructions
-        """
-        super().__init__()
-        self.dim = dim
-        self.num_channels = num_channels
-
-        # Variable that holds the estimated output for the flattened convolution vector
-        # self.conv_dim = num_filters * 4 ** 2
-
-        # Emission model handling z_i -> x_i
-        self.layer1 = nn.LSTM(latent_dim, num_filters * 2, batch_first=True)
-        self.layer2 = nn.LSTM(num_filters * 2, num_filters * 4, batch_first=True)
-        self.layer3 = nn.LSTM(num_filters * 4, num_filters * 2, batch_first=True)
-        self.layer4 = nn.LSTM(num_filters * 2, 88, batch_first=True)
-        self.act = nn.ReLU()
-        self.act_last = nn.Sigmoid()
-
-    def forward(self, zts, batch_size, T):
-        """
-        Handles decoding a batch of individual latent states into their corresponding data space reconstructions
-        :param zts: latent states [BatchSize * GenerationLen, LatentDim]
-        :return: data output [BatchSize, GenerationLen, NumChannels, H, W]
-        """
-        zts = zts.view(batch_size, T, -1)
-        z, _ = self.layer1(zts)
-        z = self.act(z)
-        z, _ = self.layer2(z)
-        z = self.act(z)
-        z, _ = self.layer3(z)
-        z = self.act(z)
-        z, _ = self.layer4(z)
-        x_rec = self.act_last(z)
-
-        # Reshape to image output
-        x_rec = x_rec.view([batch_size, T, self.num_channels, self.dim])
-        x_rec = torch.squeeze(x_rec)
-        return x_rec
-
-'''
-End Music Data
 '''
 
 
@@ -909,94 +777,8 @@ def get_act(act="relu"):
 
 
 '''
-Not in use
+DKF
 '''
-
-class Emission(nn.Module):
-    """
-    Parameterize the Bernoulli observation likelihood `p(x_t | z_t)`
-
-    Parameters
-    ----------
-    z_dim: int
-        Dim. of latent variables
-    emission_dim: int
-        Dim. of emission hidden units
-    input_dim: int
-        Dim. of inputs
-
-    Returns
-    -------
-        A valid probability that parameterizes the
-        Bernoulli distribution `p(x_t | z_t)`
-    """
-    def __init__(self, z_dim, emission_dim, input_dim, is_sigmoid=True):
-        super().__init__()
-        self.z_dim = z_dim
-        self.emission_dim = emission_dim
-        self.input_dim = input_dim
-        self.is_sigmoid = is_sigmoid
-
-        self.lin1 = nn.Linear(z_dim, emission_dim)
-        self.lin2 = nn.Linear(emission_dim, emission_dim)
-        self.lin3 = nn.Linear(emission_dim, input_dim)
-        
-        self.act = nn.ELU(inplace=True)
-        self.out = nn.Sigmoid()
-
-    def forward(self, z_t):
-        h1 = self.act(self.lin1(z_t))
-        h2 = self.act(self.lin2(h1))
-        if self.is_sigmoid:
-            return self.out(self.lin3(h2))
-        else:
-            return self.lin3(h2)
-
-
-class Aggregator(nn.Module):
-    def __init__(self, rnn_dim, z_dim, time_dim, bd=True, init=False, stochastic=True):
-        super().__init__()
-        self.rnn_dim = rnn_dim
-        self.z_dim = z_dim
-        self.time_dim = time_dim
-        self.bd = bd
-        self.init = init
-        self.stochastic = stochastic
-        
-        self.lin1 = nn.Linear(time_dim, 1)
-        self.act = nn.ELU(inplace=True)
-
-        if bd:
-            self.lin2 = nn.Linear(2 * rnn_dim, z_dim)
-        else:
-            self.lin2 = nn.Linear(rnn_dim, z_dim)
-        
-        self.lin_m = nn.Linear(z_dim, z_dim)
-        self.lin_v = nn.Linear(z_dim, z_dim)
-
-        if init:
-            self.lin_m.weight.data = torch.eye(z_dim)
-            self.lin_m.bias.data = torch.zeros(z_dim)
-        
-        self.act_v = nn.Tanh()
-
-    def forward(self, x):
-        B, T, _ = x.shape
-        x = x.permute(0, 2, 1).contiguous()
-        x = self.lin1(x)
-        x = torch.squeeze(x)
-        
-        x = self.lin2(x)
-        mu = self.lin_m(x)
-        if self.stochastic:
-            _var = self.lin_v(x)
-            _var = torch.clamp(_var, min=-100, max=85)
-            var = self.act_v(_var)
-            return mu, var
-        else:
-            return mu
-
-
 class RnnEncoder(nn.Module):
     """
     RNN encoder that outputs hidden states h_t using x_{t:T}
@@ -1156,91 +938,3 @@ class Correction(nn.Module):
             return mu, var
         else:
             return mu
-
-
-class GRU_unit(nn.Module):
-    def __init__(self, input_dim, latent_dim, num_units=100):
-        super().__init__()
-        self.update_gate = nn.Sequential(
-            nn.Linear(latent_dim + input_dim, num_units),
-            nn.Tanh(),
-            nn.Linear(num_units, latent_dim),
-            nn.Sigmoid()
-        )
-        self.reset_gate = nn.Sequential(
-            nn.Linear(latent_dim + input_dim, num_units),
-            nn.Tanh(),
-            nn.Linear(num_units, latent_dim),
-            nn.Sigmoid()
-        )
-        self.new_state_net = nn.Sequential(
-            nn.Linear(latent_dim + input_dim, num_units),
-            nn.Tanh(),
-            nn.Linear(num_units, latent_dim)
-        )
-        self.init_network_weights(self.update_gate)
-        self.init_network_weights(self.reset_gate)
-        self.init_network_weights(self.new_state_net)
-
-    def init_network_weights(self, net, std = 0.1):
-        for m in net.modules():
-            if isinstance(m, nn.Linear):
-                nn.init.normal_(m.weight, mean=0, std=std)
-                nn.init.constant_(m.bias, val=0)
-    
-    def forward(self, h, x):
-        x_cat = torch.cat([x, h], dim=1)
-        update_gate = self.update_gate(x_cat)
-        reset_gate = self.reset_gate(x_cat)
-
-        concat = torch.cat([h * reset_gate, x], dim=1)
-        new_state = self.new_state_net(concat)
-        new_x = (1 - update_gate) * new_state + update_gate * h
-
-        return new_x
-
-
-class ODE_RNN(nn.Module):
-    def __init__(self, input_dim, latent_dim, ode_layer=3):
-        super().__init__()
-        self.input_dim = input_dim
-        self.latent_dim = latent_dim
-        self.ode_layer = ode_layer
-        
-        # self.rnn = nn.GRUCell(input_size=latent_dim, hidden_size=latent_dim)
-        self.rnn = GRU_unit(input_dim, latent_dim, num_units=input_dim // 2)
-        
-        self.layers_dim = [latent_dim] + (ode_layer - 2) * [latent_dim * 2] + [latent_dim]
-        self.layers = []
-        self.acts = []
-        self.layer_norms = []
-        for i, (n_in, n_out) in enumerate(zip(self.layers_dim[:-1], self.layers_dim[1:])):
-            self.acts.append(get_act('leaky_relu') if i < ode_layer else get_act('linear'))
-            self.layers.append(nn.Linear(n_in, n_out, device=device))
-            self.layer_norms.append(nn.LayerNorm(n_out, device=device) if True and i < ode_layer else nn.Identity())
-    
-    def ode_solver(self, t, x):
-        for norm, a, layer in zip(self.layer_norms, self.acts, self.layers):
-            x = a(norm(layer(x)))
-        return x
-    
-    def forward(self, x):
-        B, T = x.shape[0], x.shape[1]
-
-        t = torch.Tensor([0, 1]).float().to(device)
-        solver = lambda t, x: self.ode_solver(t, x)
-
-        seq_length = T * torch.ones(B).int().to(device)
-        x_reverse = reverse_sequence(x, seq_length)
-
-        z_0 = torch.zeros([B, self.latent_dim]).to(device)
-        z_0 = self.rnn(z_0, x_reverse[:, 0, :])
-        for i in range(T):
-            zt_ = odeint(solver, z_0, t, method='rk4', rtol=1e-5, atol=1e-7, options={'step_size': 0.5})
-            zt_ = zt_[-1, :]
-            xt = x_reverse[:, i, :]
-            zt = self.rnn(zt_, xt)
-            z_0 = zt
-        
-        z_0 = z_0.view(B, -1)
-        return z_0

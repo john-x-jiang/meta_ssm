@@ -10,7 +10,7 @@ import torch
 from torch.utils.data import Dataset
 
 
-class PymunkData(Dataset):
+class BaseDataset(Dataset):
     """
     Load sequences of images
     """
@@ -27,6 +27,7 @@ class PymunkData(Dataset):
             self.images = self.normalize(self.images)
         elif config['out_distr'] == 'none':
             pass
+            # self.images = self.images * 0.1
 
         self.labels = npzfile['label'].astype(np.int16)
 
@@ -71,7 +72,7 @@ class PymunkData(Dataset):
         return norm_images
 
 
-class PymunkEpisoticData(Dataset):
+class EpisoticDataset(Dataset):
     """
     Load sequences of images
     """
@@ -87,6 +88,7 @@ class PymunkEpisoticData(Dataset):
             self.images = self.normalize(self.images)
         elif config['out_distr'] == 'none':
             pass
+            # self.images = self.images * 0.1
 
         # self.images = torch.from_numpy(self.images).to(device=torch.Tensor().device)
 

@@ -10,10 +10,6 @@ def kl_div(mu1, var1, mu2=None, var2=None):
     if var2 is None:
         var2 = torch.zeros_like(mu1)
 
-    # return 0.5 * (
-    #     var2.log() - var1.log() + (
-    #         var1 + (mu1 - mu2).pow(2)
-    #     ) / var2 - 1)
     return 0.5 * (
         var2 - var1 + (
             torch.exp(var1) + (mu1 - mu2).pow(2)
@@ -51,10 +47,6 @@ def meta_loss(x, x_, mu_c, var_c, mu_t, var_t, mu_0, var_0, kl_factor, loss_type
     nll_raw = nll_loss(x_, x, loss_type)
     nll_0 = nll_raw[:, 0, :].sum() / B
     nll_r = nll_raw[:, 1:obs_len, :].sum() / B / (obs_len - 1)
-    # if obs_len < T:
-    #     nll_g = nll_raw[:, obs_len:, :].sum() / B / (T - obs_len)
-    # else:
-    #     nll_g = torch.zeros_like(nll_0)
     nll_m = nll_0 * l + nll_r
 
     likelihood = nll_m
