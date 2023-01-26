@@ -1,0 +1,8 @@
+numpy
+scikit-image
+matplotlib
+scikit-learn
+scipy
+tqdm
+torchdiffeq
+ipdb
