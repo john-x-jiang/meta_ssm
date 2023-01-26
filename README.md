@@ -39,3 +39,6 @@ url={https://openreview.net/forum?id=7C9aRX2nBf2}
 1. Bouncing ball dataset generated using [the code](http://www.cs.utoronto.ca/~ilya/code/2008/RTRBM.tar) provided with the original paper.
 2. Mixed-physics datasets generated using [the code](https://github.com/deepmind/dm_hamiltonian_dynamics_suite) provided with the original paper
 3. Check [here](https://drive.google.com/drive/folders/1Tm3DNrugcSbWXSNyeGL3jQKR8y3iXx0m?usp=share_link) for generated datasets.
+
+## Cardiac Electrophysiology Model
+1. Check [EP_model](https://github.com/john-x-jiang/meta_ssm/tree/main/EP_model) for the model specific to cardiac data.
