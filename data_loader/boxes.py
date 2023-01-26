@@ -27,14 +27,13 @@ class BaseDataset(Dataset):
             self.images = self.normalize(self.images)
         elif config['out_distr'] == 'none':
             pass
-            # self.images = self.images * 0.1
 
         self.labels = npzfile['label'].astype(np.int16)
 
         # Load ground truth position and velocity (if present). This is not used in the KVAE experiments in the paper.
         if 'state' in npzfile:
             # Only load the position, not velocity
-            self.state = npzfile['state'].astype(np.float32)[:, :, :2]
+            self.state = npzfile['state'].astype(np.float32)[:, :]
             # self.velocity = npzfile['state'].astype(np.float32)[:, :, 2:]
 
             # Normalize the mean
@@ -88,21 +87,17 @@ class EpisoticDataset(Dataset):
             self.images = self.normalize(self.images)
         elif config['out_distr'] == 'none':
             pass
-            # self.images = self.images * 0.1
-
-        # self.images = torch.from_numpy(self.images).to(device=torch.Tensor().device)
 
         self.labels = npzfile['label'].astype(np.int16)
         self.label_idx = {}
         for label in np.unique(self.labels):
             idx = np.where(self.labels == label)[0]
             self.label_idx[label] = idx
-        # self.labels = torch.from_numpy(self.labels).to(device=torch.Tensor().device)
 
         # Load ground truth position and velocity (if present). This is not used in the KVAE experiments in the paper.
         if 'state' in npzfile:
             # Only load the position, not velocity
-            self.state = npzfile['state'].astype(np.float32)[:, :, :2]
+            self.state = npzfile['state'].astype(np.float32)[:, :]
             # self.velocity = npzfile['state'].astype(np.float32)[:, :, 2:]
 
             # Normalize the mean
@@ -117,7 +112,6 @@ class EpisoticDataset(Dataset):
         # We set controls to zero (we don't use them even if dim_u=1). If they are fixed to one instead (and dim_u=1)
         # the B matrix represents a bias.
         self.controls = np.zeros((self.sequences, self.timesteps, config['dim_u']), dtype=np.float32)
-        # self.controls = torch.from_numpy(self.controls).to(device=torch.Tensor().device)
 
         np.random.seed(0)
         self.split()

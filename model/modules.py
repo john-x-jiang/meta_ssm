@@ -545,11 +545,12 @@ class Transition_LSTM(nn.Module):
 
 
 class Transition_ODE(nn.Module):
-    def __init__(self, latent_dim, transition_dim, ode_layer=2, domain=False):
+    def __init__(self, latent_dim, transition_dim, ode_layer=2, act_fun='swish', domain=False):
         super().__init__()
         self.latent_dim = latent_dim
         self.transition_dim = transition_dim
         self.ode_layer = ode_layer
+        self.act_fun = act_fun
         self.domain = domain
 
         if domain:
@@ -561,7 +562,7 @@ class Transition_ODE(nn.Module):
         self.acts = []
         self.layer_norms = []
         for i, (n_in, n_out) in enumerate(zip(self.layers_dim[:-1], self.layers_dim[1:])):
-            self.acts.append(get_act('swish') if i < ode_layer else get_act('tanh'))
+            self.acts.append(get_act(act_fun) if i < ode_layer else get_act('tanh'))
             self.layers.append(nn.Linear(n_in, n_out, device=device))
             self.layer_norms.append(nn.LayerNorm(n_out, device=device) if True and i < ode_layer else nn.Identity())
     
@@ -580,7 +581,7 @@ class Transition_ODE(nn.Module):
         else:
             z_in = z_0
 
-        zt = odeint(solver, z_in, t, method='rk4', rtol=1e-5, atol=1e-7, options={'step_size': 0.25})
+        zt = odeint(solver, z_in, t, method='rk4', options={'step_size': 0.25})
         zt = zt.permute(1, 0, 2).contiguous()
         if self.domain:
             zt = self.combine(zt)
@@ -727,7 +728,7 @@ class EmissionDecoderFlow(nn.Module):
             nn.ConvTranspose2d(num_filters * 4, num_filters * 2, kernel_size=4, stride=2, padding=(1, 1)),
             nn.LeakyReLU(0.1),
             nn.ConvTranspose2d(num_filters * 2, num_channels, kernel_size=4, stride=2, padding=(1, 1)),
-            # nn.LeakyReLU(0.1),
+            nn.LeakyReLU(0.1),
         )
 
     def forward(self, zts, batch_size, T):
