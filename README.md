@@ -8,18 +8,18 @@ This repository provides the code and data described in the paper:
 
 Published on ICLR 2023.
 
-<!-- Please cite the following if you use the data or the model in your work:
+Please cite the following if you use the data or the model in your work:
 
-```
+```bibtex
 @inproceedings{
 jiang2023sequential,
 title={Sequential Latent Variable Models for Few-Shot High-Dimensional Time-Series Forecasting},
-author={Jiang, Xiajun and Missel, Ryan and Li, Zhiyuan and Wang, Linwei},
-booktitle={Submitted to The Eleventh International Conference on Learning Representations },
+author={Xiajun Jiang and Ryan Missel and Zhiyuan Li and Linwei Wang},
+booktitle={The Eleventh International Conference on Learning Representations },
 year={2023},
 url={https://openreview.net/forum?id=7C9aRX2nBf2}
 }
-``` -->
+```
 
 ## Requirements
 
