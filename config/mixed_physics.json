@@ -1,0 +1,111 @@
+{
+    "exp_name": "mixed_physics",
+    "exp_id": "01",
+    
+    "model": {
+        "type": "MetaDynamics",
+        "args": {
+            "input_dim": 32,
+            "latent_dim": 8,
+            "obs_filters": 8,
+            "obs_dim": 20,
+            "init_filters": 8,
+            "init_dim": 3,
+            "ems_filters": 4,
+            "trans_model": "recurrent",
+            "trans_args": {
+                "z_dim": 8,
+                "transition_dim": 100,
+                "identity_init": true,
+                "domain": true,
+                "stochastic": false
+            }
+        }
+    },
+
+    "data": {
+        "data_set": "BouncingBallEpisoticDataLoader",
+        "data_dir": "data/mixed_physics",
+        "data_name": "mixed",
+        "num_workers": 1,
+        "k_shot": 15,
+        "eval_tags": [
+            "spt_0",
+            "spt_1",
+            "spt_2",
+            "spt_3",
+            "spt_5",
+            "spt_6",
+            "spt_7",
+            "spt_8",
+            "spt_10",
+            "spt_11",
+            "spt_12",
+            "spt_13"
+        ],
+        "pred_tags": [
+            "qry_0",
+            "qry_1",
+            "qry_2",
+            "qry_3",
+            "qry_5",
+            "qry_6",
+            "qry_7",
+            "qry_8",
+            "qry_10",
+            "qry_11",
+            "qry_12",
+            "qry_13"
+        ]
+    },
+
+    "optimizer": {
+        "type": "Adam",
+        "args": {
+            "lr": 5e-4,
+            "amsgrad": false,
+            "betas": [0.9, 0.999]
+        }
+    },
+    "lr_scheduler": 0,
+
+    "loss": "meta_loss",
+    "metrics": [
+        "mse", "vpt", "dst", "vpd"
+    ],
+
+    "batch_size": 50,
+    "device": 0,
+    "training": {
+        "epochs": 400,
+        "overfit_single_batch": false,
+
+        "save_period": 50,
+        "loss_type": "bce",
+        "domain": true,
+        "changeable": true,
+
+        "monitor": "min val_loss",
+        "early_stop": 50,
+
+        "min_annealing_factor": 0.0,
+        "anneal_update": 100,
+
+        "total_len": 20,
+        "obs_len": 20,
+
+        "lambda": 1e-2,
+        "r1": 1,
+        "r2": 1,
+        "r3": 1,
+        "l": 1e-1
+    },
+    "evaluating": {
+        "total_len": 20,
+        "domain": true,
+        "changeable": true,
+        "batch_size": 100
+    },
+    
+    "best_model": "m_best"
+}
