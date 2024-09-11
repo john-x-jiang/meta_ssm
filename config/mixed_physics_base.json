@@ -1,9 +1,9 @@
 {
-    "exp_name": "mixed_physics",
+    "exp_name": "mixed_physics_base",
     "exp_id": "01",
     
     "model": {
-        "type": "MetaDynamics",
+        "type": "BaseDynamics",
         "args": {
             "input_dim": 32,
             "latent_dim": 8,
@@ -12,38 +12,25 @@
             "init_filters": 8,
             "init_dim": 3,
             "ems_filters": 4,
+            "domain": false,
             "trans_model": "recurrent",
             "trans_args": {
                 "z_dim": 8,
                 "transition_dim": 100,
                 "identity_init": true,
-                "domain": true,
+                "domain": false,
                 "stochastic": false
             }
         }
     },
 
     "data": {
-        "data_set": "EpisoticDataLoader",
+        "data_set": "DataLoader",
         "data_dir": "data/mixed_physics",
         "data_name": "mixed",
         "num_workers": 1,
-        "k_shot": 15,
+        "k_shot": 0,
         "eval_tags": [
-            "spt_0",
-            "spt_1",
-            "spt_2",
-            "spt_3",
-            "spt_5",
-            "spt_6",
-            "spt_7",
-            "spt_8",
-            "spt_10",
-            "spt_11",
-            "spt_12",
-            "spt_13"
-        ],
-        "pred_tags": [
             "qry_0",
             "qry_1",
             "qry_2",
@@ -69,7 +56,7 @@
     },
     "lr_scheduler": 0,
 
-    "loss": "meta_loss",
+    "loss": "dmm_loss",
     "metrics": [
         "mse", "vpt", "dst", "vpd"
     ],
@@ -82,8 +69,7 @@
 
         "save_period": 50,
         "loss_type": "bce",
-        "domain": true,
-        "changeable": true,
+        "domain": false,
 
         "monitor": "min val_loss",
         "early_stop": 50,
@@ -94,16 +80,15 @@
         "total_len": 20,
         "obs_len": 20,
 
-        "lambda": 1e-2,
-        "r1": 1,
-        "r2": 1,
-        "r3": 1,
-        "l": 1e-1
+        "lambda": 1,
+        "r1": 0.1,
+        "r2": 0,
+        "r3": 0,
+        "l": 0.1
     },
     "evaluating": {
         "total_len": 20,
-        "domain": true,
-        "changeable": true,
+        "domain": false,
         "batch_size": 100
     },
     

@@ -6,16 +6,16 @@
         "type": "MetaDynamics",
         "args": {
             "input_dim": 32,
-            "latent_dim": 64,
-            "obs_filters": 64,
-            "obs_dim": 60,
+            "latent_dim": 8,
+            "obs_filters": 8,
+            "obs_dim": 20,
             "init_filters": 8,
-            "init_dim": 5,
+            "init_dim": 3,
             "ems_filters": 4,
             "trans_model": "recurrent",
             "trans_args": {
-                "z_dim": 64,
-                "transition_dim": 128,
+                "z_dim": 8,
+                "transition_dim": 100,
                 "identity_init": true,
                 "domain": true,
                 "stochastic": false
@@ -24,11 +24,47 @@
     },
 
     "data":{
-        "data_set": "BouncingBallEpisoticDataLoader",
+        "data_set": "EpisoticDataLoader",
         "data_dir": "data/bouncing_ball",
-        "data_name": "mixed_gravity_16",
+        "data_name": "bouncingball_16",
         "num_workers": 1,
-        "k_shot": 9
+        "k_shot": 15,
+        "eval_tags": [
+            "spt_0",
+            "spt_1",
+            "spt_2",
+            "spt_3",
+            "spt_5",
+            "spt_6",
+            "spt_7",
+            "spt_8",
+            "spt_11",
+            "spt_13",
+            "spt_14",
+            "spt_15",
+            "unknown_spt_4",
+            "unknown_spt_9",
+            "unknown_spt_10",
+            "unknown_spt_12"
+        ],
+        "pred_tags": [
+            "qry_0",
+            "qry_1",
+            "qry_2",
+            "qry_3",
+            "qry_5",
+            "qry_6",
+            "qry_7",
+            "qry_8",
+            "qry_11",
+            "qry_13",
+            "qry_14",
+            "qry_15",
+            "unknown_qry_4",
+            "unknown_qry_9",
+            "unknown_qry_10",
+            "unknown_qry_12"
+        ]
     },
 
     "optimizer": {
@@ -43,10 +79,10 @@
 
     "loss": "meta_loss",
     "metrics": [
-        "mse"
+        "mse", "vpt", "dst", "vpd"
     ],
 
-    "batch_size": 100,
+    "batch_size": 50,
     "device": 0,
     "training": {
         "epochs": 200,
@@ -55,24 +91,27 @@
         "save_period": 50,
         "loss_type": "bce",
         "domain": true,
+        "changeable": true,
 
         "monitor": "min val_loss",
-        "early_stop": 50,
+        "early_stop": 100,
 
         "min_annealing_factor": 0.0,
         "anneal_update": 100,
 
-        "total_len": 60,
-        "obs_len": 60,
+        "total_len": 20,
+        "obs_len": 20,
 
-        "lambda": 1,
-        "r1": 1e-4,
-        "r2": 1e-4,
-        "r3": 1e-1
+        "lambda": 1e-2,
+        "r1": 1,
+        "r2": 1,
+        "r3": 1,
+        "l": 1e-1
     },
     "evaluating": {
-        "total_len": 60,
+        "total_len": 20,
         "domain": true,
+        "changeable": true,
         "batch_size": 100
     },
     
